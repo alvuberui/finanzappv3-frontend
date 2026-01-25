@@ -29,7 +29,6 @@ export const POST = auth(async (req) => {
     const result = await createUser(body, accessToken);
 
     if (!result.ok) {
-      // 🎨 Error normalizado para UI
       return NextResponse.json(
         {
           ok: false,
