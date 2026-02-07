@@ -1,0 +1,17 @@
+:root {
+  /* Brand gradient (title) */
+  --brand-title-from: #818cf8; /* indigo-400 */
+  --brand-title-to: #22d3ee;   /* cyan-400 */
+
+  /* Brand primary (button) */
+  --brand-primary: #4f46e5;        /* indigo-600 */
+  --brand-primary-hover: #6366f1;  /* indigo-500 */
+
+  /* Para sombras Tailwind (solo RGB, sin alpha) */
+  --brand-primary-rgb: 79 70 229;  /* indigo-600 */
+
+  /* CTA gradient */
+  --brand-cta-from: #4338ca; /* indigo-700 */
+  --brand-cta-via:  #7e22ce; /* purple-700 */
+  --brand-cta-to:   #a21caf; /* fuchsia-700 */
+}
