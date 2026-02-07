@@ -7,8 +7,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
  
 
-  return <>
-  <Navbar title="Dashboard" />
-  {children}
-  </>;
+  <Navbar subtitle="Dashboard" />
+
 }
