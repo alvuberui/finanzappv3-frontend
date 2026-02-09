@@ -10,7 +10,7 @@ function redirectToLogin(req: NextRequest) {
 
   const qs = searchParams.toString();
   url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
-  return NextResponse.redirect(url);
+  return NextResponse.redirect(url );
 }
 
 function isPublicPath(pathname: string) {
