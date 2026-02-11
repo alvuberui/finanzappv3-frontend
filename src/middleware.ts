@@ -1,12 +1,16 @@
+// src/middleware.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/app/lib/auth";
 
 function redirectToHome(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
+
+  // Si ya estamos en la raíz, NO redirigimos (evita bucle)
+  if (pathname === "/") return NextResponse.next();
+
   const url = req.nextUrl.clone();
   url.pathname = "/";
 
-  // guardamos a dónde quería ir
   const qs = searchParams.toString();
   url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
 
@@ -16,7 +20,7 @@ function redirectToHome(req: NextRequest) {
 export default auth(async (req) => {
   const { pathname } = req.nextUrl;
 
-  // Solo protegemos /app/**
+  // PROTEGER solo /app/**
   const isAppRoute = pathname === "/app" || pathname.startsWith("/app/");
 
   if (!isAppRoute) return NextResponse.next();
@@ -28,7 +32,6 @@ export default auth(async (req) => {
   return NextResponse.next();
 });
 
-// IMPORTANTÍSIMO: el middleware solo se ejecuta en /app/**
 export const config = {
   matcher: ["/app/:path*"],
 };
