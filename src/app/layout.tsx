@@ -1,26 +1,20 @@
+// src/app/layout.tsx
 import Providers from "./Providers";
 import "./globals.css";
 import "@/styles/brand.css";
-import { auth } from "@/app/lib/auth";
-import { redirect } from "next/navigation";
 
 export const metadata = {
   title: "FinanzApp",
   description: "Finanzas personales, fácil y moderno",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
-
-  // Si no hay sesión, vuelve al home (con callback)
-  if (!session?.user?.email) {
-    redirect("/?callbackUrl=/app");
-  }
-
+  // NOTA: NO llamar a auth() ni redirigir aquí (evita bucles).
+  // La protección de /app/** la hace middleware + app/(app)/layout (ProtectedLayout).
   return (
     <html lang="es">
       <body>

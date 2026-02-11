@@ -11,7 +11,7 @@ export default function Home() {
   const searchParams = useSearchParams();
 
   // en src/app/page.tsx (o /login) -> useEffect
-useEffect(() => {
+ useEffect(() => {
     if (status === "authenticated") {
       const callbackUrl = searchParams.get("callbackUrl") ?? "/app";
 

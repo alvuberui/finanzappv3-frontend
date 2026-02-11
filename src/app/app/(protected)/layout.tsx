@@ -1,3 +1,4 @@
+// src/app/app/layout.tsx
 import { auth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import Navbar from "../components/Navbar";
@@ -9,26 +10,29 @@ export default async function ProtectedLayout({
 }) {
   const session = await auth();
 
+  // Si no hay sesión -> redirigir al home para que inicie login
   if (!session?.user?.email) {
+    // callbackUrl a /app para que al loguear vuelva a /app
     redirect("/?callbackUrl=/app");
   }
 
   const apigateway = process.env.API_GATEWAY_URL;
 
-  // Si no está configurado, no bloquees
-  if (!apigateway) return <>{children}</>;
+  // Si no hay apigateway configurado, devolvemos children para no bloquear
+  if (!apigateway) {
+    return (
+      <>
+        <Navbar subtitle="Dashboard" />
+        {children}
+      </>
+    );
+  }
 
-  // Aquí idealmente pasarías access token al API gateway si lo requiere.
-  // Pero tu gateway lo estás protegiendo con Bearer. En tu NextAuth,
-  // ahora mismo NO estás metiendo accessToken en el JWT/session.
-  // Te lo arreglo en el paso 5.
   const accessToken = (session as any).accessToken as string | undefined;
 
   try {
     const res = await fetch(
-      `${apigateway}/user/users/isOnboarded?email=${encodeURIComponent(
-        session.user.email
-      )}`,
+      `${apigateway}/user/users/isOnboarded?email=${encodeURIComponent(session.user.email)}`,
       {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
         cache: "no-store",
@@ -40,13 +44,17 @@ export default async function ProtectedLayout({
       if (data.result === false) {
         redirect("/app/onboarding");
       }
+    } else {
+      // En caso de 401/403 o fallo, no bloqueamos la app — se puede mejorar según tu API
     }
-  } catch {
-    // Si falla el check, no rompas la app
+  } catch (err) {
+    // Si falla la comprobación, no rompas la app en producción. Considera loggear.
   }
 
-  return <>
-  <Navbar subtitle="Dashboard" />
-  {children}
-  </>;
+  return (
+    <>
+      <Navbar subtitle="Dashboard" />
+      {children}
+    </>
+  );
 }
