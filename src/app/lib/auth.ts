@@ -88,6 +88,9 @@ export const {
       issuer: process.env.AUTH_KEYCLOAK_ISSUER!,
       clientId: process.env.AUTH_KEYCLOAK_ID!,
       clientSecret: process.env.AUTH_KEYCLOAK_SECRET!,
+      client: {
+        token_endpoint_auth_method: "client_secret_post",
+      },
       checks: ["pkce", "state"],
       authorization: { params: { scope: "openid profile email" } },
       profile(profile) {
@@ -97,7 +100,7 @@ export const {
           email: profile.email,
         }
       },
-    }),
+    })
   ],
 
   session: { strategy: "jwt" },
@@ -130,10 +133,15 @@ export const {
     },
 
     async session({ session, token }: any) {
-      session.user = session.user ?? {}
-      session.user.email = token.email
-      ;(session as any).tokenError = token.error
-      return session
+      session.user = session.user ?? {};
+      session.user.email = token.email;
+
+      (session as any).tokenError = token.error;
+      (session as any).accessToken = (token as any).accessToken;
+
+      return session;
     },
+
+
   },
 })
