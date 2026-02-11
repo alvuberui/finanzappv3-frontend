@@ -3,7 +3,7 @@
 import { useSession } from "next-auth/react";
 import { signIn } from "next-auth/react";
 import { useEffect } from "react";
-import { useRouter, useSearchParams  } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export default function Home() {
   const { data: session, status } = useSession();
@@ -11,7 +11,7 @@ export default function Home() {
   const searchParams = useSearchParams();
 
   // en src/app/page.tsx (o /login) -> useEffect
- useEffect(() => {
+  useEffect(() => {
     if (status === "authenticated") {
       const callbackUrl = searchParams.get("callbackUrl") ?? "/app";
 
