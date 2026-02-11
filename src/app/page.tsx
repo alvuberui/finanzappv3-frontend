@@ -3,17 +3,25 @@
 import { useSession } from "next-auth/react";
 import { signIn } from "next-auth/react";
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams  } from "next/navigation";
 
 export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  useEffect(() => {
+  // en src/app/page.tsx (o /login) -> useEffect
+useEffect(() => {
     if (status === "authenticated") {
-      router.replace("/app");
+      const callbackUrl = searchParams.get("callbackUrl") ?? "/app";
+
+      // evita redirigir a la misma ruta (previene bucles)
+      if (callbackUrl !== window.location.pathname) {
+        router.replace(callbackUrl);
+      }
     }
-  }, [status, router]);
+  }, [status, router, searchParams]);
+
 
   const isLoading = status === "loading";
   const isLoggedIn = status === "authenticated";
