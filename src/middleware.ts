@@ -2,21 +2,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
-const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET;
-
-/**
- * Redirige a "/" (añadiendo callbackUrl) evitando bucles.
- */
 function redirectToHome(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
-  // Si ya estamos en la raíz, NO redirigimos (evita bucle)
+  // evita bucle si ya estás en /
   if (pathname === "/") return NextResponse.next();
 
   const url = req.nextUrl.clone();
   url.pathname = "/";
 
-  // Solo añadimos callbackUrl si no existe
+  // añade callbackUrl solo si no existe
   if (!url.searchParams.get("callbackUrl")) {
     const qs = searchParams.toString();
     url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
@@ -25,30 +20,61 @@ function redirectToHome(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
+async function getAnyToken(req: NextRequest) {
+  const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+
+  // Importante: en producción suele ser "__Secure-authjs.session-token" (NextAuth v5)
+  // En dev: "authjs.session-token"
+  // Y si fuera v4: "__Secure-next-auth.session-token" / "next-auth.session-token"
+  const cookieCandidates =
+    process.env.NODE_ENV === "production"
+      ? [
+          "__Secure-authjs.session-token",
+          "authjs.session-token",
+          "__Secure-next-auth.session-token",
+          "next-auth.session-token",
+        ]
+      : [
+          "authjs.session-token",
+          "__Secure-authjs.session-token",
+          "next-auth.session-token",
+          "__Secure-next-auth.session-token",
+        ];
+
+  // 1) intenta primero sin cookieName (por si funciona con autodetección)
+  try {
+    const t0 = await getToken({ req, secret });
+    if (t0) return t0;
+  } catch {
+    // seguimos probando candidatos
+  }
+
+  // 2) prueba candidatos explícitos
+  for (const cookieName of cookieCandidates) {
+    try {
+      const t = await getToken({ req, secret, cookieName });
+      if (t) return t;
+    } catch {
+      // intenta siguiente
+    }
+  }
+
+  return null;
+}
+
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // PROTEGER solo /app/**
+  // proteger solo /app/**
   const isAppRoute = pathname === "/app" || pathname.startsWith("/app/");
-
   if (!isAppRoute) return NextResponse.next();
 
-  // Comprobamos token/session con next-auth
-  try {
-    const token = await getToken({ req, secret: NEXTAUTH_SECRET });
+  const token = await getAnyToken(req);
 
-    // Si no hay token -> redirect to home (login entry)
-    if (!token) {
-      return redirectToHome(req);
-    }
+  // si no hay token -> fuera a /
+  if (!token) return redirectToHome(req);
 
-    // Si hay token, permitimos continuar
-    return NextResponse.next();
-  } catch (err) {
-    // En caso de error al leer el token, mejor no bloquear toda la app; redirigimos al home
-    console.error("middleware getToken error:", err);
-    return redirectToHome(req);
-  }
+  return NextResponse.next();
 }
 
 export const config = {
