@@ -13,8 +13,6 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // NOTA: NO llamar a auth() ni redirigir aquí (evita bucles).
-  // La protección de /app/** la hace middleware + app/(app)/layout (ProtectedLayout).
   return (
     <html lang="es">
       <body>
