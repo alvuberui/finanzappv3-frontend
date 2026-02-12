@@ -129,21 +129,51 @@ export default function OnboardingPage() {
             initialValues={initialValues}
             validationSchema={schema}
             onSubmit={async (values, helpers) => {
-              try {
-                await submit(values);
+            try {
+              await (async () => {
+                setServerMsg(null);
 
-                helpers.setSubmitting(false);
+                const payload: OnboardingPayload = {
+                  email: values.email.trim().toLowerCase(), // ✅ normaliza
+                  name: values.name.trim(),
+                  lastname: values.lastname.trim(),
+                  birthdate: values.birthdate,
+                  initialWealth: Number(values.initialWealth),
+                  monthlySavingPercentage: Number(values.monthlySavingPercentage),
+                  monthlyNecessaryExpensesPercentage: Number(values.monthlyNecessaryExpensesPercentage),
+                  monthlyDiscretionaryExpensesPercentage: Number(values.monthlyDiscretionaryExpensesPercentage),
+                  monthlyInvestmentPercentage: Number(values.monthlyInvestmentPercentage),
+                };
 
-                // ✅ Redirect cuando TODO ha ido bien
-                router.replace("/app");
-              } catch (e: any) {
-                setServerMsg({
-                  type: "err",
-                  text: e?.message ?? "Error enviando el onboarding.",
+                const res = await fetch("/api/onboarding", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(payload),
                 });
-                helpers.setSubmitting(false);
-              }
-            }}
+
+                const json = await res.json().catch(() => null);
+
+                if (!res.ok || json?.ok === false) {
+                  throw new Error(json?.error?.message ?? "Error enviando el onboarding");
+                }
+
+                return json?.data;
+              })();
+
+              helpers.setSubmitting(false);
+
+              // ✅ Redirect + refresh (CLAVE para que el layout server re-chequee isOnboarded)
+              router.replace("/app");
+              router.refresh();
+            } catch (e: any) {
+              setServerMsg({
+                type: "err",
+                text: e?.message ?? "Error enviando el onboarding.",
+              });
+              helpers.setSubmitting(false);
+            }
+          }}
+
           >
 
             {({ isSubmitting, values, isValid, submitCount }) => {
