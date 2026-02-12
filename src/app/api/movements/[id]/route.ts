@@ -1,6 +1,5 @@
-// app/api/movements/[id]/route.ts
+// src/app/api/movements/[id]/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 type BackendMovementType =
@@ -22,7 +21,6 @@ type BackendMovement = {
   amount: number;
   date: string; // YYYY-MM-DD
   tagId?: number | null;
-  // opcionales si el backend los envía
   tagName?: string | null;
   tagColor?: string | null;
   description?: string | null;
@@ -43,8 +41,6 @@ type EditMovementToBackend = {
   tagId?: number | null;
   description?: string;
 };
-
-type RouteCtx = { params: Promise<{ id: string }> };
 
 function mapBackendToFront(t: BackendMovementType): FrontMovementType {
   if (t === "DISCRETIONARY_EXPENSE") return "NOT_ESSENTIAL_EXPENSE";
@@ -73,15 +69,25 @@ function parseId(idStr: string) {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
-async function requireAccessToken(req: any) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const accessToken = (token as any)?.accessToken as string | undefined;
-  return accessToken;
+function baseUrl() {
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
 }
 
-export const GET = auth(async (req, ctx: RouteCtx) => {
+function getIdFromCtx(ctx: any): string | undefined {
+  const raw = ctx?.params?.id;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw[0];
+  return undefined;
+}
+
+/* =========================
+ * GET movement by id
+ * ========================= */
+export const GET = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -89,16 +95,15 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const { id: idStr } = await ctx.params;
-    const id = parseId(idStr);
+    const idStr = getIdFromCtx(ctx);
+    const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
         { ok: false, error: { message: "id inválido" } },
@@ -106,8 +111,7 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
-    const url = `${baseUrl}/movement/movements/${id}`;
+    const url = `${baseUrl()}/movement/movements/${id}`;
 
     const res = await fetch(url, {
       method: "GET",
@@ -141,7 +145,6 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
 
     const data = (await res.json()) as BackendMovement;
 
-    // Mapeo front-friendly; mantenemos tagName/tagColor si vienen
     const mapped = {
       ...data,
       movementType: mapBackendToFront(data.movementType),
@@ -160,9 +163,14 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
   }
 });
 
-export const PUT = auth(async (req, ctx: RouteCtx) => {
+/* =========================
+ * PUT movement
+ * ========================= */
+export const PUT = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -170,16 +178,15 @@ export const PUT = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const { id: idStr } = await ctx.params;
-    const id = parseId(idStr);
+    const idStr = getIdFromCtx(ctx);
+    const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
         { ok: false, error: { message: "id inválido" } },
@@ -231,9 +238,11 @@ export const PUT = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    if (body.hasOwnProperty("tagId")) {
-      // si viene la propiedad, validar (puede ser null para quitar etiqueta)
-      if (tagId !== null && (typeof tagId !== "number" || !Number.isFinite(tagId) || tagId <= 0)) {
+    if (Object.prototype.hasOwnProperty.call(body, "tagId")) {
+      if (
+        tagId !== null &&
+        (typeof tagId !== "number" || !Number.isFinite(tagId) || tagId <= 0)
+      ) {
         return NextResponse.json(
           { ok: false, error: { message: "tagId inválido (debe ser positivo o null)" } },
           { status: 400 }
@@ -256,10 +265,8 @@ export const PUT = auth(async (req, ctx: RouteCtx) => {
       }
     }
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
-    const url = `${baseUrl}/movement/movements/${id}`;
+    const url = `${baseUrl()}/movement/movements/${id}`;
 
-    // IMPORTANTE: incluimos tagId en el payload **si la propiedad existe en el body**
     const payloadToBackend: EditMovementToBackend = {
       movementType: mapFrontToBackend(movementType),
       amount,
@@ -318,9 +325,14 @@ export const PUT = auth(async (req, ctx: RouteCtx) => {
   }
 });
 
-export const DELETE = auth(async (req, ctx: RouteCtx) => {
+/* =========================
+ * DELETE movement
+ * ========================= */
+export const DELETE = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -328,16 +340,15 @@ export const DELETE = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const { id: idStr } = await ctx.params;
-    const id = parseId(idStr);
+    const idStr = getIdFromCtx(ctx);
+    const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
         { ok: false, error: { message: "id inválido" } },
@@ -345,8 +356,7 @@ export const DELETE = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
-    const url = `${baseUrl}/movement/movements/${id}`;
+    const url = `${baseUrl()}/movement/movements/${id}`;
 
     const res = await fetch(url, {
       method: "DELETE",

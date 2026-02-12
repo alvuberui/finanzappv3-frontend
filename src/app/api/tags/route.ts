@@ -1,6 +1,5 @@
-// app/api/tags/route.ts
+// src/app/api/tags/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 type TagDto = {
@@ -14,11 +13,6 @@ type CreateTagIncoming = {
   color: string;
 };
 
-async function requireAccessToken(req: any) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  return (token as any)?.accessToken as string | undefined;
-}
-
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
@@ -31,6 +25,8 @@ function backendUrl(path: string) {
 export const GET = auth(async (req) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -38,10 +34,9 @@ export const GET = auth(async (req) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
@@ -91,6 +86,8 @@ export const GET = auth(async (req) => {
 export const POST = auth(async (req) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -98,10 +95,9 @@ export const POST = auth(async (req) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }

@@ -1,6 +1,5 @@
-// app/api/movements/[tagId]/route.ts
+// src/app/api/movements/[tagId]/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 type BackendMovementType =
@@ -9,7 +8,6 @@ type BackendMovementType =
   | "DISCRETIONARY_EXPENSE"
   | "INVESTMENT";
 
-// Lo que tu front usa en el dashboard (tu mapeo actual)
 type FrontMovementType =
   | "BENEFIT"
   | "ESSENTIAL_EXPENSE"
@@ -52,8 +50,6 @@ type HistoricalMovementResponseDto = {
   series: HistoricalDashboardDto[];
 };
 
-type RouteCtx = { params: Promise<{ tagId: string }> };
-
 function mapBackendToFront(t: BackendMovementType): FrontMovementType {
   if (t === "DISCRETIONARY_EXPENSE") return "NOT_ESSENTIAL_EXPENSE";
   return t;
@@ -68,9 +64,15 @@ function parseId(idStr: string) {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
-async function requireAccessToken(req: any) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  return (token as any)?.accessToken as string | undefined;
+function baseUrl() {
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+}
+
+function getParamAsString(ctx: any, name: string): string | undefined {
+  const raw = ctx?.params?.[name];
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw) && raw.length > 0) return raw[0];
+  return undefined;
 }
 
 function backendError(resStatus: number, backendBody: any, url: string) {
@@ -92,9 +94,11 @@ function backendError(resStatus: number, backendBody: any, url: string) {
   );
 }
 
-export const GET = auth(async (req, ctx: RouteCtx) => {
+export const GET = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -102,16 +106,15 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const { tagId: tagIdStr } = await ctx.params;
-    const tagId = parseId(tagIdStr);
+    const tagIdStr = getParamAsString(ctx, "tagId");
+    const tagId = tagIdStr ? parseId(tagIdStr) : null;
     if (!tagId) {
       return NextResponse.json(
         { ok: false, error: { message: "tagId inválido" } },
@@ -130,9 +133,8 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
     const from = urlObj.searchParams.get("from") ?? undefined;
     const to = urlObj.searchParams.get("to") ?? undefined;
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
-    // 👇 Ajusta este basePath si tu backend es distinto
-    const basePath = `${baseUrl}/movement/movements`;
+    const base = baseUrl();
+    const basePath = `${base.replace(/\/$/, "")}/movement/movements`;
 
     // --------------------------
     // HISTORICAL
@@ -184,9 +186,9 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
 
       const url =
         `${basePath}/anual/${tagId}` +
-        `?from=${encodeURIComponent(from)}` +
-        `&to=${encodeURIComponent(to)}` +
-        `&metric=${encodeURIComponent(metric)}`;
+        `?from=${encodeURIComponent(from as string)}` +
+        `&to=${encodeURIComponent(to as string)}` +
+        `&metric=${encodeURIComponent(metric as string)}`;
 
       const res = await fetch(url, {
         method: "GET",
@@ -209,7 +211,6 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
     // --------------------------
     // LIST (movimientos por rango)
     // --------------------------
-
     if (!isYmd(from) || !isYmd(to)) {
       return NextResponse.json(
         { ok: false, error: { message: "from y to son requeridos (YYYY-MM-DD)" } },
@@ -219,8 +220,8 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
 
     const url =
       `${basePath}/tag/${tagId}` +
-      `?from=${encodeURIComponent(from)}` +
-      `&to=${encodeURIComponent(to)}`;
+      `?from=${encodeURIComponent(from as string)}` +
+      `&to=${encodeURIComponent(to as string)}`;
 
     const res = await fetch(url, {
       method: "GET",
@@ -238,7 +239,7 @@ export const GET = auth(async (req, ctx: RouteCtx) => {
 
     const data = (await res.json()) as MovementResponseDto[];
 
-    // mapeo front-friendly (igual que tu route de referencia)
+    // mapeo front-friendly
     const mapped = (data ?? []).map((m) => ({
       ...m,
       movementType: mapBackendToFront(m.movementType),

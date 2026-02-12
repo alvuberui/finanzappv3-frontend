@@ -1,6 +1,5 @@
-// app/api/user/route.ts
+// src/app/api/user/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 /**
@@ -18,19 +17,19 @@ const USERS_URL = () => `${BACKEND_URL}/user/users/`;
 
 export const GET = auth(async (req) => {
   try {
-    if (!req.auth?.user?.email) {
+    const email = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
+    if (!email) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
         { status: 401 }
       );
     }
 
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const accessToken = (token as any)?.accessToken as string | undefined;
-
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
@@ -74,19 +73,19 @@ export const GET = auth(async (req) => {
 
 export const PUT = auth(async (req) => {
   try {
-    if (!req.auth?.user?.email) {
+    const email = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
+    if (!email) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
         { status: 401 }
       );
     }
 
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const accessToken = (token as any)?.accessToken as string | undefined;
-
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
@@ -100,15 +99,6 @@ export const PUT = auth(async (req) => {
 
     /**
      * Body = UpdateUserRequestDto
-     * {
-     *   name: string;
-     *   lastname: string;
-     *   birthdate: "yyyy-MM-dd";
-     *   monthlySavingPercentage: number;
-     *   monthlyNecessaryExpensesPercentage: number;
-     *   monthlyDiscretionaryExpensesPercentage: number;
-     *   monthlyInvestmentPercentage: number;
-     * }
      */
     const body = await req.json();
 
