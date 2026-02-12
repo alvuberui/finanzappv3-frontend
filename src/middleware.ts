@@ -5,13 +5,11 @@ import { getToken } from "next-auth/jwt";
 function redirectToHome(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
-  // evita bucle si ya estás en /
   if (pathname === "/") return NextResponse.next();
 
   const url = req.nextUrl.clone();
   url.pathname = "/";
 
-  // añade callbackUrl solo si no existe
   if (!url.searchParams.get("callbackUrl")) {
     const qs = searchParams.toString();
     url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
@@ -23,9 +21,6 @@ function redirectToHome(req: NextRequest) {
 async function getAnyToken(req: NextRequest) {
   const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
 
-  // Importante: en producción suele ser "__Secure-authjs.session-token" (NextAuth v5)
-  // En dev: "authjs.session-token"
-  // Y si fuera v4: "__Secure-next-auth.session-token" / "next-auth.session-token"
   const cookieCandidates =
     process.env.NODE_ENV === "production"
       ? [
@@ -41,22 +36,14 @@ async function getAnyToken(req: NextRequest) {
           "__Secure-next-auth.session-token",
         ];
 
-  // 1) intenta primero sin cookieName (por si funciona con autodetección)
-  try {
-    const t0 = await getToken({ req, secret });
-    if (t0) return t0;
-  } catch {
-    // seguimos probando candidatos
-  }
+  // intento normal
+  const t0 = await getToken({ req, secret }).catch(() => null);
+  if (t0) return t0;
 
-  // 2) prueba candidatos explícitos
+  // intento con cookieName explícito
   for (const cookieName of cookieCandidates) {
-    try {
-      const t = await getToken({ req, secret, cookieName });
-      if (t) return t;
-    } catch {
-      // intenta siguiente
-    }
+    const t = await getToken({ req, secret, cookieName }).catch(() => null);
+    if (t) return t;
   }
 
   return null;
@@ -65,13 +52,12 @@ async function getAnyToken(req: NextRequest) {
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // proteger solo /app/**
-  const isAppRoute = pathname === "/app" || pathname.startsWith("/app/");
-  if (!isAppRoute) return NextResponse.next();
+  // Protege /app/**
+  if (!(pathname === "/app" || pathname.startsWith("/app/"))) {
+    return NextResponse.next();
+  }
 
   const token = await getAnyToken(req);
-
-  // si no hay token -> fuera a /
   if (!token) return redirectToHome(req);
 
   return NextResponse.next();
