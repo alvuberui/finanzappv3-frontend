@@ -1,6 +1,5 @@
-// app/api/ideal-percentage/route.ts
+// src/app/api/ideal-percentage/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 type IdealPercentage = {
@@ -12,19 +11,19 @@ type IdealPercentage = {
 
 export const GET = auth(async (req) => {
   try {
-    if (!req.auth?.user?.email) {
+    const email = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
+    if (!email) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
         { status: 401 }
       );
     }
 
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const accessToken = (token as any)?.accessToken as string | undefined;
-
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }

@@ -1,12 +1,6 @@
-// app/api/tags/[id]/route.ts
+// src/app/api/tags/[id]/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
-
-async function requireAccessToken(req: any) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  return (token as any)?.accessToken as string | undefined;
-}
 
 function parseId(idStr: string) {
   const n = Number(idStr);
@@ -24,6 +18,8 @@ function backendUrl(path: string) {
 export const GET = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -31,15 +27,14 @@ export const GET = auth(async (req, ctx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const params = await (ctx as any).params;
+    const params = (ctx as any)?.params;
     const idStr = params?.id as string | undefined;
 
     const id = idStr ? parseId(idStr) : null;
@@ -83,7 +78,6 @@ export const GET = auth(async (req, ctx) => {
     }
 
     const data = await res.json();
-
     return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(
@@ -99,6 +93,8 @@ export const GET = auth(async (req, ctx) => {
 export const DELETE = auth(async (req, ctx) => {
   try {
     const userEmail = req.auth?.user?.email;
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+
     if (!userEmail) {
       return NextResponse.json(
         { ok: false, error: { message: "No autenticado" } },
@@ -106,15 +102,14 @@ export const DELETE = auth(async (req, ctx) => {
       );
     }
 
-    const accessToken = await requireAccessToken(req);
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
-    const params = await (ctx as any).params;
+    const params = (ctx as any)?.params;
     const idStr = params?.id as string | undefined;
 
     const id = idStr ? parseId(idStr) : null;

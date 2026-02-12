@@ -1,6 +1,5 @@
-// app/api/movements/route.ts
+// src/app/api/movements/route.ts
 import { NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/app/lib/auth";
 
 type BackendMovement = {
@@ -121,6 +120,10 @@ function isYmd(s: unknown): s is string {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+function baseUrl() {
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+}
+
 /**
  * POST /api/movements
  */
@@ -134,12 +137,10 @@ export const POST = auth(async (req) => {
       );
     }
 
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const accessToken = (token as any)?.accessToken as string | undefined;
-
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
@@ -220,8 +221,7 @@ export const POST = auth(async (req) => {
       );
     }
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
-    const url = `${baseUrl}/movement/movements`;
+    const url = `${baseUrl()}/movement/movements`;
 
     const payloadToBackend: CreateMovementToBackend = {
       userEmail,
@@ -280,24 +280,21 @@ export const GET = auth(async (req) => {
       );
     }
 
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const accessToken = (token as any)?.accessToken as string | undefined;
-
+    const accessToken = (req.auth as any)?.accessToken as string | undefined;
     if (!accessToken) {
       return NextResponse.json(
-        { ok: false, error: { message: "Token inválido" } },
+        { ok: false, error: { message: "Token inválido (sin accessToken)" } },
         { status: 401 }
       );
     }
 
     const { searchParams } = new URL(req.url);
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+    const base = baseUrl();
 
     // ✅ MODO "SAVINGS": /api/movements?savings=1
     const savingsFlag = searchParams.get("savings");
     if (savingsFlag === "1" || savingsFlag === "true" || savingsFlag === "yes") {
-      // Ajusta esta URL si tu gateway expone otra ruta
-      const url = `${baseUrl}/movement/movements/savings`;
+      const url = `${base}/movement/movements/savings`;
 
       const res = await fetch(url, {
         method: "GET",
@@ -320,7 +317,6 @@ export const GET = auth(async (req) => {
         );
       }
 
-      // Backend devuelve Double -> puede venir como número o string según gateway
       const contentType = res.headers.get("content-type") ?? "";
       const raw = contentType.includes("application/json")
         ? await res.json().catch(() => null)
@@ -342,7 +338,7 @@ export const GET = auth(async (req) => {
     // ✅ MODO "YEARS": /api/movements?years=1
     const yearsFlag = searchParams.get("years");
     if (yearsFlag === "1" || yearsFlag === "true" || yearsFlag === "yes") {
-      const url = `${baseUrl}/movement/movements/allYears`;
+      const url = `${base}/movement/movements/allYears`;
 
       const res = await fetch(url, {
         method: "GET",
@@ -400,7 +396,7 @@ export const GET = auth(async (req) => {
       const from = `${year}-01-01`;
       const to = `${year}-12-31`;
 
-      const url = `${baseUrl}/movement/movements/anual?from=${from}&to=${to}&metric=${encodeURIComponent(
+      const url = `${base}/movement/movements/anual?from=${from}&to=${to}&metric=${encodeURIComponent(
         metricRaw
       )}`;
 
@@ -452,7 +448,7 @@ export const GET = auth(async (req) => {
         );
       }
 
-      const url = `${baseUrl}/movement/movements/historical?metric=${encodeURIComponent(
+      const url = `${base}/movement/movements/historical?metric=${encodeURIComponent(
         metricRaw
       )}`;
 
@@ -506,7 +502,7 @@ export const GET = auth(async (req) => {
     }
 
     const { from, to } = getMonthRange(year, monthIndex0);
-    const url = `${baseUrl}/movement/movements?from=${from}&to=${to}`;
+    const url = `${baseUrl()}/movement/movements?from=${from}&to=${to}`;
 
     const res = await fetch(url, {
       method: "GET",
