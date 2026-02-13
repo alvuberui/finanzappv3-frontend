@@ -5,6 +5,7 @@ import Keycloak from "next-auth/providers/keycloak";
 type Token = {
   accessToken?: string;
   refreshToken?: string;
+  idToken?: string;
   expiresAt?: number; // epoch ms
   email?: string;
   error?: "RefreshAccessTokenError" | "NoRefreshToken" | "MissingKeycloakEnv";
@@ -44,7 +45,6 @@ async function refreshAccessToken(token: Token): Promise<Token> {
       const txt = await res.text();
       console.error("Keycloak refresh failed:", res.status, txt);
 
-      // evita loops infinitos si refresh token inválido
       return {
         ...token,
         accessToken: undefined,
@@ -60,6 +60,8 @@ async function refreshAccessToken(token: Token): Promise<Token> {
       ...token,
       accessToken: refreshed.access_token,
       refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      // id_token normalmente NO viene en refresh; conservamos el anterior
+      idToken: token.idToken,
       expiresAt: Date.now() + refreshed.expires_in * 1000,
       error: undefined,
     };
@@ -90,9 +92,7 @@ export const {
       issuer: process.env.AUTH_KEYCLOAK_ISSUER!,
       clientId: process.env.AUTH_KEYCLOAK_ID!,
       clientSecret: process.env.AUTH_KEYCLOAK_SECRET!,
-      client: {
-        token_endpoint_auth_method: "client_secret_post",
-      },
+      client: { token_endpoint_auth_method: "client_secret_post" },
       checks: ["pkce", "state"],
       authorization: { params: { scope: "openid profile email" } },
       profile(profile) {
@@ -111,12 +111,14 @@ export const {
     async jwt({ token, account, profile }: any) {
       const t = token as Token;
 
+      // email desde profile
       if (profile?.email && !t.email) t.email = profile.email;
 
       // Login inicial
       if (account?.access_token) {
         t.accessToken = account.access_token;
         t.refreshToken = account.refresh_token;
+        t.idToken = account.id_token; // ✅ CLAVE para logout perfecto
         t.expiresAt = Date.now() + account.expires_in * 1000;
         t.error = undefined;
         return t;
@@ -140,6 +142,7 @@ export const {
 
       (session as any).tokenError = (token as any).error;
       (session as any).accessToken = (token as any).accessToken;
+      (session as any).idToken = (token as any).idToken; // ✅ CLAVE
 
       return session;
     },
