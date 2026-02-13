@@ -2,31 +2,14 @@
 "use client";
 
 import { useSession, signIn } from "next-auth/react";
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 
 export default function ClientHome() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  useEffect(() => {
-    if (status === "authenticated") {
-      const callbackUrl = searchParams.get("callbackUrl") ?? "/app";
-
-      // evita redirigir a la misma ruta (previene bucles)
-      if (callbackUrl !== window.location.pathname) {
-        router.replace(callbackUrl);
-      }
-    }
-  }, [status, router, searchParams]);
-
+  const { status } = useSession();
   const isLoading = status === "loading";
   const isLoggedIn = status === "authenticated";
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 flex flex-col">
-      {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center text-center px-6">
         <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
           FinanzApp
@@ -50,33 +33,22 @@ export default function ClientHome() {
               Iniciar sesión / Registrarse
             </button>
           ) : (
-            <p className="text-lg text-gray-400">Entrando a tu panel…</p>
+            <p className="text-lg text-gray-400">Cargando tu sesión…</p>
           )}
         </div>
       </section>
 
-      {/* Features */}
       <section className="py-16 px-6 bg-black/30 backdrop-blur-sm border-t border-white/10">
         <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">
           ¿Por qué usar FinanzApp?
         </h2>
         <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          <Feature
-            title="📊 Control total"
-            desc="Registra tus ingresos y gastos y visualiza estadísticas claras en tiempo real."
-          />
-          <Feature
-            title="🎯 Objetivos financieros"
-            desc="Define metas de ahorro/inversión y mide tu progreso con gráficas intuitivas."
-          />
-          <Feature
-            title="🔒 Seguridad"
-            desc="Autenticación con Keycloak, cifrado y privacidad de nivel empresarial."
-          />
+          <Feature title="📊 Control total" desc="Registra tus ingresos y gastos y visualiza estadísticas claras en tiempo real." />
+          <Feature title="🎯 Objetivos financieros" desc="Define metas de ahorro/inversión y mide tu progreso con gráficas intuitivas." />
+          <Feature title="🔒 Seguridad" desc="Autenticación con Keycloak, cifrado y privacidad de nivel empresarial." />
         </div>
       </section>
 
-      {/* CTA */}
       <section className="py-20 px-6 bg-gradient-to-r from-[var(--brand-cta-from)] via-[var(--brand-cta-via)] to-[var(--brand-cta-to)] text-center">
         <h2 className="text-3xl md:text-4xl font-bold mb-6">
           Toma el control de tus finanzas hoy mismo
@@ -94,7 +66,6 @@ export default function ClientHome() {
         )}
       </section>
 
-      {/* Footer */}
       <footer className="py-8 px-6 bg-black/40 text-center border-t border-white/10">
         <p className="text-sm text-gray-400">
           © {new Date().getFullYear()} FinanzApp. Todos los derechos reservados.

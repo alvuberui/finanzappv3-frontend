@@ -1,43 +1,40 @@
 // src/middleware.ts
-import { NextResponse, type NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { NextResponse } from "next/server";
+import { auth } from "@/app/lib/auth";
 
-function redirectToHome(req: NextRequest) {
+export default auth((req) => {
   const { pathname, searchParams } = req.nextUrl;
-  if (pathname === "/") return NextResponse.next();
 
-  const url = req.nextUrl.clone();
-  url.pathname = "/";
-
-  if (!url.searchParams.get("callbackUrl")) {
-    const qs = searchParams.toString();
-    url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
-  }
-
-  return NextResponse.redirect(url);
-}
-
-export default async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // Solo protege /app/**
+  // Solo proteger /app/**
   if (!(pathname === "/app" || pathname.startsWith("/app/"))) {
     return NextResponse.next();
   }
 
-  const secret = process.env.NEXTAUTH_SECRET; // usa este (tu auth.ts ya lo usa)
-  const token = await getToken({ req, secret }).catch(() => null);
+  // Si NO hay sesión => home con callbackUrl
+  if (!req.auth) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/";
+    if (!url.searchParams.get("callbackUrl")) {
+      const qs = searchParams.toString();
+      url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
+    }
+    return NextResponse.redirect(url);
+  }
 
-  // no sesión => fuera
-  if (!token) return redirectToHome(req);
-
-  // sesión “rota” (refresh fallido / sin refresh) => tratar como no autenticado (regla #4)
-  if ((token as any).error === "RefreshAccessTokenError" || (token as any).error === "NoRefreshToken") {
-    return redirectToHome(req);
+  // Si token inválido / refresh fallido => home (regla #4)
+  const tokenError = (req.auth as any)?.tokenError;
+  if (tokenError) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/";
+    if (!url.searchParams.get("callbackUrl")) {
+      const qs = searchParams.toString();
+      url.searchParams.set("callbackUrl", pathname + (qs ? `?${qs}` : ""));
+    }
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: ["/app/:path*"],

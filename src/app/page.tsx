@@ -1,4 +1,4 @@
-// app/page.tsx
+// src/app/page.tsx
 import { auth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import ClientHome from "./ClientHome";
@@ -9,7 +9,7 @@ export default async function Page() {
   // No autenticado => landing pública
   if (!session?.user?.email) return <ClientHome />;
 
-  // sesión rota => tratar como no autenticado
+  // sesión inválida => landing pública
   const tokenError = (session as any).tokenError;
   const accessToken = (session as any).accessToken as string | undefined;
   if (tokenError || !accessToken) return <ClientHome />;
