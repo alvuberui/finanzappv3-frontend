@@ -1,64 +1,36 @@
 import { auth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import Navbar from "../components/Navbar";
-import { headers } from "next/headers";
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
 
-  if (!session?.user?.email) {
-    redirect("/?callbackUrl=/app");
-  }
+  // 1) No autenticado => fuera
+  if (!session?.user?.email) redirect("/?callbackUrl=/app");
 
-  const h = await headers();
-  const path = h.get("next-url") ?? "";
-  const isOnboardingRoute = path.startsWith("/app/onboarding");
-
-  const apigateway = process.env.API_GATEWAY_URL;
+  // 4) sesión caducada/refresh fallido => fuera
+  const tokenError = (session as any).tokenError;
   const accessToken = (session as any).accessToken as string | undefined;
-  console.log("[layout] email:", session.user.email);
-  console.log("[layout] has accessToken:", Boolean(accessToken));
-  console.log("[layout] tokenError:", (session as any).tokenError);
-  // Si no puedo comprobar -> lo trato como NO onboarded
-  if (!apigateway || !accessToken) {
-    if (!isOnboardingRoute) redirect("/app/onboarding");
-    return (
-      <>
-        <Navbar subtitle="Dashboard" />
-        {children}
-      </>
-    );
-  }
+  if (tokenError || !accessToken) redirect("/?callbackUrl=/app");
 
-  try {
-    const res = await fetch(
-      `${apigateway}/user/users/isOnboarded?email=${encodeURIComponent(session.user.email)}`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        cache: "no-store",
-      }
-    );
-    console.log("[layout] isOnboarded response status:", res);
-    // Si falla la comprobación -> NO onboarded
-    if (!res.ok) {
-      if (!isOnboardingRoute) redirect("/app/onboarding");
-    } else {
-      const data = (await res.json()) as { result: boolean };
+  // 1) y 2) comprobar perfil
+  const apigateway = process.env.API_GATEWAY_URL;
+  if (!apigateway) redirect("/?callbackUrl=/app"); // si no hay backend, mejor tratar como inválido
 
-      // ✅ Caso: NO onboarded → fuera de onboarding => mandar a onboarding
-      if (data.result === false) {
-        if (!isOnboardingRoute) redirect("/app/onboarding");
-      }
+  const res = await fetch(
+    `${apigateway}/user/users/isOnboarded?email=${encodeURIComponent(session.user.email)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" }
+  );
 
-      // ✅ Caso: SÍ onboarded → si intenta onboarding => mandar a home privada
-      if (data.result === true) {
-        if (isOnboardingRoute) redirect("/app"); // o "/app/user"
-      }
-    }
-  } catch {
-    if (!isOnboardingRoute) redirect("/app/onboarding");
-  }
+  // si falla la comprobación, decide política: yo recomiendo “fuera” para evitar loops raros
+  if (!res.ok) redirect("/?callbackUrl=/app");
 
+  const data = (await res.json()) as { result: boolean };
+
+  // 1) autenticado SIN perfil => al onboarding
+  if (data.result === false) redirect("/app/onboarding");
+
+  // ✅ autenticado CON perfil => OK
   return (
     <>
       <Navbar subtitle="Dashboard" />
