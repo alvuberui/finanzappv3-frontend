@@ -16,7 +16,9 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 
   const apigateway = process.env.API_GATEWAY_URL;
   const accessToken = (session as any).accessToken as string | undefined;
-
+  console.log("[layout] email:", session.user.email);
+  console.log("[layout] has accessToken:", Boolean(accessToken));
+  console.log("[layout] tokenError:", (session as any).tokenError);
   // Si no puedo comprobar -> lo trato como NO onboarded
   if (!apigateway || !accessToken) {
     if (!isOnboardingRoute) redirect("/app/onboarding");
@@ -36,7 +38,7 @@ export default async function ProtectedLayout({ children }: { children: React.Re
         cache: "no-store",
       }
     );
-
+    console.log("[layout] isOnboarded response status:", res);
     // Si falla la comprobación -> NO onboarded
     if (!res.ok) {
       if (!isOnboardingRoute) redirect("/app/onboarding");
