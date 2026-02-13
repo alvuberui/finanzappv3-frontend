@@ -1,25 +1,25 @@
-// src/app/app/layout.tsx
 import { auth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import Navbar from "../components/Navbar";
+import { headers } from "next/headers";
 
-export default async function ProtectedLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
 
-  // Si no hay sesión -> redirigir al home para que inicie login
   if (!session?.user?.email) {
-    // callbackUrl a /app para que al loguear vuelva a /app
     redirect("/?callbackUrl=/app");
   }
 
-  const apigateway = process.env.API_GATEWAY_URL;
+  const h = await headers();
+  const path = h.get("next-url") ?? "";
+  const isOnboardingRoute = path.startsWith("/app/onboarding");
 
-  // Si no hay apigateway configurado, devolvemos children para no bloquear
-  if (!apigateway) {
+  const apigateway = process.env.API_GATEWAY_URL;
+  const accessToken = (session as any).accessToken as string | undefined;
+
+  // Si no puedo comprobar -> lo trato como NO onboarded
+  if (!apigateway || !accessToken) {
+    if (!isOnboardingRoute) redirect("/app/onboarding");
     return (
       <>
         <Navbar subtitle="Dashboard" />
@@ -28,27 +28,33 @@ export default async function ProtectedLayout({
     );
   }
 
-  const accessToken = (session as any).accessToken as string | undefined;
-
   try {
     const res = await fetch(
       `${apigateway}/user/users/isOnboarded?email=${encodeURIComponent(session.user.email)}`,
       {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        headers: { Authorization: `Bearer ${accessToken}` },
         cache: "no-store",
       }
     );
 
-    if (res.ok) {
-      const data = (await res.json()) as { result: boolean };
-      if (data.result === false) {
-        redirect("/app/onboarding");
-      }
+    // Si falla la comprobación -> NO onboarded
+    if (!res.ok) {
+      if (!isOnboardingRoute) redirect("/app/onboarding");
     } else {
-      // En caso de 401/403 o fallo, no bloqueamos la app — se puede mejorar según tu API
+      const data = (await res.json()) as { result: boolean };
+
+      // ✅ Caso: NO onboarded → fuera de onboarding => mandar a onboarding
+      if (data.result === false) {
+        if (!isOnboardingRoute) redirect("/app/onboarding");
+      }
+
+      // ✅ Caso: SÍ onboarded → si intenta onboarding => mandar a home privada
+      if (data.result === true) {
+        if (isOnboardingRoute) redirect("/app"); // o "/app/user"
+      }
     }
-  } catch (err) {
-    // Si falla la comprobación, no rompas la app en producción. Considera loggear.
+  } catch {
+    if (!isOnboardingRoute) redirect("/app/onboarding");
   }
 
   return (
