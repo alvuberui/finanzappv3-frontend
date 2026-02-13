@@ -4,6 +4,7 @@ import React, { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 type NavItem = {
   href: string;
@@ -21,7 +22,7 @@ export default function Navbar({
   subtitle?: string;
 }) {
   const pathname = usePathname();
-
+  const router = useRouter();
   const items: NavItem[] = useMemo(
     () => [
       { href: "/app/tags", label: "Etiquetas" },
@@ -69,7 +70,7 @@ export default function Navbar({
             {/* Logout */}
             <button
               type="button"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => router.push("/logout")}
               className="ml-0 md:ml-2 px-4 py-2 rounded-full text-sm font-semibold transition
                          text-red-300 hover:text-red-200 hover:bg-red-500/10"
             >
