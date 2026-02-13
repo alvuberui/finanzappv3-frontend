@@ -4,7 +4,6 @@ import { getToken } from "next-auth/jwt";
 
 function redirectToHome(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
-
   if (pathname === "/") return NextResponse.next();
 
   const url = req.nextUrl.clone();
@@ -18,47 +17,24 @@ function redirectToHome(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-async function getAnyToken(req: NextRequest) {
-  const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
-
-  const cookieCandidates =
-    process.env.NODE_ENV === "production"
-      ? [
-          "__Secure-authjs.session-token",
-          "authjs.session-token",
-          "__Secure-next-auth.session-token",
-          "next-auth.session-token",
-        ]
-      : [
-          "authjs.session-token",
-          "__Secure-authjs.session-token",
-          "next-auth.session-token",
-          "__Secure-next-auth.session-token",
-        ];
-
-  // intento normal
-  const t0 = await getToken({ req, secret }).catch(() => null);
-  if (t0) return t0;
-
-  // intento con cookieName explícito
-  for (const cookieName of cookieCandidates) {
-    const t = await getToken({ req, secret, cookieName }).catch(() => null);
-    if (t) return t;
-  }
-
-  return null;
-}
-
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Protege /app/**
+  // Solo protege /app/**
   if (!(pathname === "/app" || pathname.startsWith("/app/"))) {
     return NextResponse.next();
   }
 
-  const token = await getAnyToken(req);
+  const secret = process.env.NEXTAUTH_SECRET; // usa este (tu auth.ts ya lo usa)
+  const token = await getToken({ req, secret }).catch(() => null);
+
+  // no sesión => fuera
   if (!token) return redirectToHome(req);
+
+  // sesión “rota” (refresh fallido / sin refresh) => tratar como no autenticado (regla #4)
+  if ((token as any).error === "RefreshAccessTokenError" || (token as any).error === "NoRefreshToken") {
+    return redirectToHome(req);
+  }
 
   return NextResponse.next();
 }
