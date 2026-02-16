@@ -1,10 +1,35 @@
 // src/app/ClientHome.tsx
 "use client";
 
-import { useSession, signIn } from "next-auth/react";
+import { useSession, signIn, signOut } from "next-auth/react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function ClientHome() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    // Caso raro: la sesión existe localmente pero el token está roto (refresh falló).
+    // En ese caso forzamos logout local y dejamos que el usuario vuelva a iniciar sesión.
+    const tokenError = (session as any)?.tokenError;
+    const accessToken = (session as any)?.accessToken as string | undefined;
+
+    if (status === "authenticated" && (tokenError || !accessToken)) {
+      // `signOut` local sin redirección forzada al provider
+      void (async () => {
+        try {
+          await signOut({ redirect: false });
+        } catch (e) {
+          // ignore
+        } finally {
+          // aseguramos estar en la landing pública
+          router.replace("/");
+        }
+      })();
+    }
+  }, [status, session, router]);
+
   const isLoading = status === "loading";
   const isLoggedIn = status === "authenticated";
 
@@ -33,6 +58,8 @@ export default function ClientHome() {
               Iniciar sesión / Registrarse
             </button>
           ) : (
+            // Si llegamos aquí está autenticado y no hemos forzado signOut:
+            // mostramos un texto de espera (la redirección server-side debería ocurrir).
             <p className="text-lg text-gray-400">Cargando tu sesión…</p>
           )}
         </div>
