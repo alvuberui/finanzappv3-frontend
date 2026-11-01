@@ -1,6 +1,7 @@
 // src/app/api/user/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, sameOriginFailure } from "@/app/lib/api/errors";
 
 /**
  * Backend:
@@ -15,10 +16,10 @@ import { auth } from "@/app/lib/auth";
 const BACKEND_URL = process.env.API_GATEWAY_URL;
 const USERS_URL = () => `${BACKEND_URL}/user/users/`;
 
-export const GET = auth(async (req) => {
+export const GET = serverAuth(async (req) => {
   try {
     const email = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!email) {
       return NextResponse.json(
@@ -50,31 +51,28 @@ export const GET = auth(async (req) => {
       cache: "no-store",
     });
 
-    const data = await res.json().catch(() => null);
-
     if (!res.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: { message: data?.message ?? "Error obteniendo usuario" },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error obteniendo el usuario");
     }
 
+    const data = await res.json().catch(() => null);
+
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
 });
 
-export const PUT = auth(async (req) => {
+export const PUT = serverAuth(async (req) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
+
     const email = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!email) {
       return NextResponse.json(
@@ -113,22 +111,14 @@ export const PUT = auth(async (req) => {
     });
 
     // updateUser devuelve void, pero por si hay body
-    const maybeJson = await res.json().catch(() => null);
-
     if (!res.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: { message: maybeJson?.message ?? "Error actualizando usuario" },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error actualizando el usuario");
     }
 
     return NextResponse.json({ ok: true, data: null }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

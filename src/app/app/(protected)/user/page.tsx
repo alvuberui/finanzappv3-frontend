@@ -4,6 +4,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { sumMoney } from "@/app/lib/money";
+import { ButtonLoading, InlineLoading } from "@/app/components/LoadingUI";
+import { Toast } from "@/app/components/FeedbackUI";
 
 type UserProfile = {
   id: number;
@@ -87,11 +91,12 @@ const schema = Yup.object({
 }).test("percentages-sum-100", "La suma de los porcentajes mensuales debe ser 100", (values) => {
   if (!values) return false;
 
-  const s =
-    toNumber((values as any).monthlySavingPercentage) +
-    toNumber((values as any).monthlyNecessaryExpensesPercentage) +
-    toNumber((values as any).monthlyDiscretionaryExpensesPercentage) +
-    toNumber((values as any).monthlyInvestmentPercentage);
+  const s = sumMoney([
+    toNumber((values as Record<string, unknown>).monthlySavingPercentage),
+    toNumber((values as Record<string, unknown>).monthlyNecessaryExpensesPercentage),
+    toNumber((values as Record<string, unknown>).monthlyDiscretionaryExpensesPercentage),
+    toNumber((values as Record<string, unknown>).monthlyInvestmentPercentage),
+  ]);
 
   return Math.abs(s - 100) < 0.0001;
 });
@@ -121,31 +126,31 @@ export default function UserProfilePage() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  // ✅ NUEVO: Patrimonio líquido actual (fuera del form)
-  const [liquidWealth, setLiquidWealth] = useState<number | null>(null);
-  const [liquidLoading, setLiquidLoading] = useState(false);
-  const [liquidError, setLiquidError] = useState<string | null>(null);
+  // ✅ Patrimonio neto actual (fuera del form)
+  const [netWorth, setNetWorth] = useState<number | null>(null);
+  const [netWorthLoading, setNetWorthLoading] = useState(false);
+  const [netWorthError, setNetWorthError] = useState<string | null>(null);
 
-  async function fetchLiquidWealth() {
+  async function fetchNetWorth() {
     try {
-      setLiquidLoading(true);
-      setLiquidError(null);
+      setNetWorthLoading(true);
+      setNetWorthError(null);
 
-      const res = await fetch("/api/movements?savings=1", { cache: "no-store" });
+      const res = await fetch("/api/movements?netWorth=1", { cache: "no-store" });
       const json = await res.json().catch(() => null);
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error?.message ?? "Error cargando patrimonio líquido");
+        throw new Error(json?.error?.message ?? "Error cargando patrimonio neto");
       }
 
       const val = json?.data;
       const num = typeof val === "number" ? val : Number(val);
-      setLiquidWealth(Number.isFinite(num) ? num : 0);
-    } catch (e: any) {
-      setLiquidError(e?.message ?? "Error cargando patrimonio líquido");
-      setLiquidWealth(null);
+      setNetWorth(Number.isFinite(num) ? num : 0);
+    } catch (e: unknown) {
+      setNetWorthError(getErrorMessage(e, "Error cargando patrimonio neto"));
+      setNetWorth(null);
     } finally {
-      setLiquidLoading(false);
+      setNetWorthLoading(false);
     }
   }
 
@@ -167,8 +172,8 @@ export default function UserProfilePage() {
 
         const u = json.data as UserProfile;
         if (!cancelled) setProfile(u);
-      } catch (e: any) {
-        if (!cancelled) setLoadError(e?.message ?? "Error cargando el perfil");
+      } catch (e: unknown) {
+        if (!cancelled) setLoadError(getErrorMessage(e, "Error cargando el perfil"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -180,10 +185,11 @@ export default function UserProfilePage() {
     };
   }, []);
 
-  // ✅ cargar patrimonio líquido actual (al entrar a la página)
+  // ✅ cargar patrimonio neto actual (al entrar a la página)
   useEffect(() => {
-    fetchLiquidWealth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // La petición externa actualiza el estado cuando termina.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchNetWorth();
   }, []);
 
   const formInitialValues = useMemo(() => {
@@ -210,6 +216,7 @@ export default function UserProfilePage() {
       name: values.name.trim(),
       lastname: values.lastname.trim(),
       birthdate: values.birthdate, // "yyyy-MM-dd"
+      initialWealth: toNumber(values.initialWealth),
       monthlySavingPercentage: toNumber(values.monthlySavingPercentage),
       monthlyNecessaryExpensesPercentage: toNumber(values.monthlyNecessaryExpensesPercentage),
       monthlyDiscretionaryExpensesPercentage: toNumber(values.monthlyDiscretionaryExpensesPercentage),
@@ -232,21 +239,25 @@ export default function UserProfilePage() {
     const json2 = await res2.json().catch(() => null);
     if (res2.ok && json2?.ok) setProfile(json2.data as UserProfile);
 
+    // El patrimonio neto depende del patrimonio inicial recién guardado.
+    await fetchNetWorth();
+
     return json2?.data as UserProfile;
   }
 
-  const sumPercentages = (v: any) => {
-    const s =
-      toNumber(v.monthlySavingPercentage) +
-      toNumber(v.monthlyNecessaryExpensesPercentage) +
-      toNumber(v.monthlyDiscretionaryExpensesPercentage) +
-      toNumber(v.monthlyInvestmentPercentage);
+  const sumPercentages = (v: Record<string, unknown>) => {
+    const s = sumMoney([
+      toNumber(v.monthlySavingPercentage),
+      toNumber(v.monthlyNecessaryExpensesPercentage),
+      toNumber(v.monthlyDiscretionaryExpensesPercentage),
+      toNumber(v.monthlyInvestmentPercentage),
+    ]);
     return s;
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 flex items-center justify-center px-6 py-14">
-      <div className="w-full max-w-3xl">
+    <main className="app-shell flex min-h-screen items-center justify-center px-4 py-10 text-gray-100 sm:px-6 sm:py-14">
+      <div className="fade-up w-full max-w-3xl">
         <header className="text-center mb-10">
           <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
             Perfil de usuario
@@ -255,43 +266,43 @@ export default function UserProfilePage() {
         </header>
 
         {/* ✅ NUEVO: apartado fuera del form */}
-        <div className="mb-6 bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg p-6 md:p-8">
+        <div className="surface mb-6 rounded-[1.75rem] p-6 md:p-8">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold">Patrimonio líquido actual</h2>
+              <h2 className="text-xl font-semibold">Patrimonio neto actual</h2>
               <p className="text-sm text-gray-300 mt-1">
-                Calculado a partir de tus movimientos (ingresos − gastos).
+                Calculado como patrimonio inicial + beneficios − gastos.
               </p>
             </div>
 
             <div className="text-right">
               <div className="text-2xl md:text-3xl font-extrabold">
-                {liquidLoading ? "Cargando…" : liquidError ? "—" : formatEUR(liquidWealth)}
+                {netWorthLoading ? "Cargando…" : netWorthError ? "—" : formatEUR(netWorth)}
               </div>
 
               <button
                 type="button"
-                onClick={fetchLiquidWealth}
-                disabled={liquidLoading}
+                onClick={fetchNetWorth}
+                disabled={netWorthLoading}
                 className="mt-2 px-4 py-2 rounded-full text-sm font-semibold transition
                            bg-white/10 hover:bg-white/15 text-gray-100
                            disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {liquidLoading ? "Actualizando…" : "Actualizar"}
+                {netWorthLoading ? "Actualizando…" : "Actualizar"}
               </button>
             </div>
           </div>
 
-          {liquidError && (
+          {netWorthError && (
             <div className="mt-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              {liquidError}
+              {netWorthError}
             </div>
           )}
         </div>
 
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg p-6 md:p-8">
+        <div className="surface rounded-[1.75rem] p-6 md:p-8">
           {loading ? (
-            <div className="text-sm text-gray-300">Cargando perfil…</div>
+            <div className="py-8 text-sm"><InlineLoading label="Cargando tu perfil" /></div>
           ) : loadError ? (
             <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
               {loadError}
@@ -307,8 +318,8 @@ export default function UserProfilePage() {
                   setServerMsg({ type: "ok", text: "Perfil actualizado correctamente." });
                   helpers.setSubmitting(false);
                   router.refresh();
-                } catch (e: any) {
-                  setServerMsg({ type: "err", text: e?.message ?? "Error actualizando el perfil." });
+                } catch (e: unknown) {
+                  setServerMsg({ type: "err", text: getErrorMessage(e, "Error actualizando el perfil.") });
                   helpers.setSubmitting(false);
                 }
               }}
@@ -340,12 +351,12 @@ export default function UserProfilePage() {
                         </Labeled>
 
                         <div className="md:col-span-2">
-                          <Labeled name="initialWealth" label="Patrimonio inicial (€)" hint="No editable">
+                          <Labeled name="initialWealth" label="Patrimonio inicial (€)" hint="Se usa para calcular tu patrimonio neto">
                             <Field
                               name="initialWealth"
                               inputMode="decimal"
-                              className={inputClass + " opacity-70"}
-                              disabled
+                              className={inputClass}
+                              placeholder="0"
                             />
                           </Labeled>
                         </div>
@@ -400,18 +411,9 @@ export default function UserProfilePage() {
                       )}
                     </section>
 
-                    {serverMsg && (
-                      <div
-                        className={[
-                          "rounded-2xl border px-4 py-3 text-sm",
-                          serverMsg.type === "ok"
-                            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                            : "border-amber-400/30 bg-amber-500/10 text-amber-100",
-                        ].join(" ")}
-                      >
-                        {serverMsg.text}
-                      </div>
-                    )}
+                    {serverMsg ? (
+                      <Toast message={serverMsg.text} tone={serverMsg.type === "ok" ? "success" : "error"} onClose={() => setServerMsg(null)} />
+                    ) : null}
 
                     <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
                       <p className="text-xs text-gray-400">
@@ -426,7 +428,7 @@ export default function UserProfilePage() {
                                    disabled:opacity-50 disabled:cursor-not-allowed
                                    [--tw-shadow-color:rgb(var(--brand-primary-rgb)/0.30)]"
                       >
-                        {isSubmitting ? "Actualizando…" : "Actualizar perfil"}
+                        {isSubmitting ? <ButtonLoading label="Actualizando" /> : "Actualizar perfil"}
                       </button>
                     </div>
                   </Form>
@@ -441,7 +443,7 @@ export default function UserProfilePage() {
 }
 
 const inputClass =
-  "w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 outline-none focus:border-[var(--brand-title-from)]";
+  "w-full rounded-2xl border border-white/10 bg-[#081525]/80 px-4 py-3 text-slate-100 shadow-inner shadow-black/10 outline-none placeholder:text-slate-600 transition focus:border-cyan-300/50 focus:bg-[#0b1b31] focus:ring-4 focus:ring-cyan-300/10";
 
 function Labeled({
   name,

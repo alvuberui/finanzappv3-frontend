@@ -1,16 +1,16 @@
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import Navbar from "../components/Navbar";
 
 export default async function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
+  const session = await serverAuth();
 
   // 1) No autenticado => fuera
   if (!session?.user?.email) redirect("/?callbackUrl=/app");
 
   // 4) sesión caducada/refresh fallido => fuera
-  const tokenError = (session as any).tokenError;
-  const accessToken = (session as any).accessToken as string | undefined;
+  const tokenError = session?.tokenError;
+  const accessToken = session?.accessToken;
   if (tokenError || !accessToken) redirect("/?callbackUrl=/app");
 
   // 1) y 2) comprobar perfil

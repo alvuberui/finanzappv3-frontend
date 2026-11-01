@@ -1,17 +1,17 @@
 // src/app/page.tsx
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 import ClientHome from "./ClientHome";
 
 export default async function Page() {
-  const session = await auth();
+  const session = await serverAuth();
 
   // No autenticado => landing pública
   if (!session?.user?.email) return <ClientHome />;
 
   // sesión inválida => landing pública
-  const tokenError = (session as any).tokenError;
-  const accessToken = (session as any).accessToken as string | undefined;
+  const tokenError = session?.tokenError;
+  const accessToken = session?.accessToken;
   if (tokenError || !accessToken) return <ClientHome />;
 
   const apigateway = process.env.API_GATEWAY_URL;

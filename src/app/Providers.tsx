@@ -18,14 +18,12 @@ function SessionKickout() {
 
     // Si la sesión está autenticada pero el token ha fallado en el refresh,
     // forzamos logout local y llevamos a home para evitar estado atascado.
-    const tokenError = (session as any)?.tokenError;
-    const accessToken = (session as any)?.accessToken as string | undefined;
-
-    if (status === "authenticated" && (tokenError || !accessToken)) {
+    const tokenError = session?.tokenError;
+    if (status === "authenticated" && tokenError) {
       (async () => {
         try {
           await signOut({ redirect: false });
-        } catch (e) {
+        } catch {
           // ignore
         } finally {
           router.replace("/");

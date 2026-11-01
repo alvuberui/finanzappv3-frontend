@@ -1,15 +1,15 @@
 // src/app/lib/auth.ts
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthConfig } from "next-auth";
+import type { JWT } from "next-auth/jwt";
 import Keycloak from "next-auth/providers/keycloak";
 
-type Token = {
+type Token = JWT & {
   accessToken?: string;
   refreshToken?: string;
   idToken?: string;
   expiresAt?: number; // epoch ms
   email?: string;
   error?: "RefreshAccessTokenError" | "NoRefreshToken" | "MissingKeycloakEnv";
-  [key: string]: any;
 };
 
 async function refreshAccessToken(token: Token): Promise<Token> {
@@ -77,13 +77,8 @@ async function refreshAccessToken(token: Token): Promise<Token> {
   }
 }
 
-export const {
-  auth,
-  signIn,
-  signOut,
-  handlers: { GET, POST },
-} = NextAuth({
-  debug: true,
+const authOptions: NextAuthConfig = {
+  debug: false,
   trustHost: true,
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 
@@ -108,18 +103,18 @@ export const {
   session: { strategy: "jwt" },
 
   callbacks: {
-    async jwt({ token, account, profile }: any) {
+    async jwt({ token, account, profile }) {
       const t = token as Token;
 
       // email desde profile
-      if (profile?.email && !t.email) t.email = profile.email;
+      if (typeof profile?.email === "string" && !t.email) t.email = profile.email;
 
       // Login inicial
       if (account?.access_token) {
         t.accessToken = account.access_token;
         t.refreshToken = account.refresh_token;
         t.idToken = account.id_token; // ✅ CLAVE para logout perfecto
-        t.expiresAt = Date.now() + account.expires_in * 1000;
+        t.expiresAt = Date.now() + (account.expires_in ?? 300) * 1000;
         t.error = undefined;
         return t;
       }
@@ -136,14 +131,39 @@ export const {
       return await refreshAccessToken(t);
     },
 
-    async session({ session, token }: any) {
+    async session({ session, token }) {
       session.user = session.user ?? {};
-      (session.user as any).email = token.email;
+      if (token.email) session.user.email = token.email;
 
-      (session as any).tokenError = (token as any).error;
-      (session as any).accessToken = (token as any).accessToken;
-      (session as any).idToken = (token as any).idToken; // ✅ CLAVE
+      session.tokenError = token.error;
 
+      return session;
+    },
+  },
+};
+
+// La sesión pública solo contiene identidad y estado de autenticación.
+// Los tokens de Keycloak permanecen en el JWT HttpOnly y nunca llegan al navegador.
+export const {
+  auth,
+  signIn,
+  signOut,
+  handlers: { GET, POST },
+} = NextAuth(authOptions);
+
+// Las rutas/layouts del servidor necesitan los tokens para hablar con el backend.
+// Esta segunda fachada nunca se usa para el endpoint de sesión del navegador.
+export const { auth: serverAuth } = NextAuth({
+  ...authOptions,
+  callbacks: {
+    ...authOptions.callbacks,
+    async session({ session, token }) {
+      session.user = session.user ?? {};
+      if (token.email) session.user.email = token.email;
+      session.tokenError = token.error;
+      session.accessToken = token.accessToken;
+      session.idToken = token.idToken;
+      session.expiresAt = token.expiresAt;
       return session;
     },
   },

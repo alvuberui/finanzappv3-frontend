@@ -1,6 +1,7 @@
 // src/app/api/movements/[tagId]/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, isValidYmd } from "@/app/lib/api/errors";
 
 type BackendMovementType =
   | "BENEFIT"
@@ -55,49 +56,28 @@ function mapBackendToFront(t: BackendMovementType): FrontMovementType {
   return t;
 }
 
-function isYmd(s: unknown): s is string {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 function parseId(idStr: string) {
   const n = Number(idStr);
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
 function baseUrl() {
-  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8080";
 }
 
-function getParamAsString(ctx: any, name: string): string | undefined {
-  const raw = ctx?.params?.[name];
+type RouteContext = { params?: Promise<{ tagId?: string | string[] }> };
+
+async function getParamAsString(ctx: RouteContext | undefined, name: "tagId"): Promise<string | undefined> {
+  const raw = (await ctx?.params)?.[name];
   if (typeof raw === "string") return raw;
   if (Array.isArray(raw) && raw.length > 0) return raw[0];
   return undefined;
 }
 
-function backendError(resStatus: number, backendBody: any, url: string) {
-  const backendMessage =
-    backendBody && typeof backendBody === "object"
-      ? (backendBody as any).message
-      : undefined;
-
-  return NextResponse.json(
-    {
-      ok: false,
-      error: {
-        message: backendMessage ?? `Backend error (${resStatus})`,
-        backend: backendBody || undefined,
-        urlCalled: url,
-      },
-    },
-    { status: resStatus }
-  );
-}
-
-export const GET = auth(async (req, ctx) => {
+export const GET = serverAuth(async (req, ctx: RouteContext) => {
   try {
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -113,7 +93,7 @@ export const GET = auth(async (req, ctx) => {
       );
     }
 
-    const tagIdStr = getParamAsString(ctx, "tagId");
+    const tagIdStr = await getParamAsString(ctx, "tagId");
     const tagId = tagIdStr ? parseId(tagIdStr) : null;
     if (!tagId) {
       return NextResponse.json(
@@ -156,11 +136,7 @@ export const GET = auth(async (req, ctx) => {
       });
 
       if (!res.ok) {
-        const contentType = res.headers.get("content-type") ?? "";
-        const backendBody = contentType.includes("application/json")
-          ? await res.json().catch(() => null)
-          : await res.text().catch(() => "");
-        return backendError(res.status, backendBody, url);
+        return await backendErrorResponse(res, "Error cargando el histórico");
       }
 
       const data = (await res.json()) as HistoricalMovementResponseDto;
@@ -177,7 +153,7 @@ export const GET = auth(async (req, ctx) => {
           { status: 400 }
         );
       }
-      if (!isYmd(from) || !isYmd(to)) {
+      if (!isValidYmd(from) || !isValidYmd(to)) {
         return NextResponse.json(
           { ok: false, error: { message: "from/to requeridos con formato YYYY-MM-DD" } },
           { status: 400 }
@@ -197,11 +173,7 @@ export const GET = auth(async (req, ctx) => {
       });
 
       if (!res.ok) {
-        const contentType = res.headers.get("content-type") ?? "";
-        const backendBody = contentType.includes("application/json")
-          ? await res.json().catch(() => null)
-          : await res.text().catch(() => "");
-        return backendError(res.status, backendBody, url);
+        return await backendErrorResponse(res, "Error cargando el resumen anual");
       }
 
       const data = (await res.json()) as AnualMovementResponseDto;
@@ -211,7 +183,7 @@ export const GET = auth(async (req, ctx) => {
     // --------------------------
     // LIST (movimientos por rango)
     // --------------------------
-    if (!isYmd(from) || !isYmd(to)) {
+    if (!isValidYmd(from) || !isValidYmd(to)) {
       return NextResponse.json(
         { ok: false, error: { message: "from y to son requeridos (YYYY-MM-DD)" } },
         { status: 400 }
@@ -230,11 +202,7 @@ export const GET = auth(async (req, ctx) => {
     });
 
     if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-      return backendError(res.status, backendBody, url);
+      return await backendErrorResponse(res, "Error cargando los movimientos");
     }
 
     const data = (await res.json()) as MovementResponseDto[];
@@ -250,9 +218,9 @@ export const GET = auth(async (req, ctx) => {
     }));
 
     return NextResponse.json({ ok: true, data: mapped }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

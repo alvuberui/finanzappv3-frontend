@@ -1,6 +1,7 @@
 // src/app/api/tags/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, sameOriginFailure } from "@/app/lib/api/errors";
 
 type TagDto = {
   id: number;
@@ -17,15 +18,19 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
+function isHexColor(v: string): boolean {
+  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v);
+}
+
 function backendUrl(path: string) {
-  const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+  const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8080";
   return `${baseUrl}${path}`;
 }
 
-export const GET = auth(async (req) => {
+export const GET = serverAuth(async (req) => {
   try {
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -50,43 +55,25 @@ export const GET = auth(async (req) => {
     });
 
     if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error cargando las etiquetas");
     }
 
     const data = (await res.json()) as TagDto[];
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
 });
 
-export const POST = auth(async (req) => {
+export const POST = serverAuth(async (req) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -119,9 +106,9 @@ export const POST = auth(async (req) => {
       );
     }
 
-    if (!isNonEmptyString(color)) {
+    if (!isNonEmptyString(color) || !isHexColor(color.trim())) {
       return NextResponse.json(
-        { ok: false, error: { message: "color inválido" } },
+        { ok: false, error: { message: "color inválido (usa formato hexadecimal)" } },
         { status: 400 }
       );
     }
@@ -139,34 +126,14 @@ export const POST = auth(async (req) => {
     });
 
     if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error creando la etiqueta");
     }
 
     const data = (await res.json().catch(() => null)) as TagDto | null;
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

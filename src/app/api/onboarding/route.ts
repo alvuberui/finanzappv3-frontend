@@ -1,12 +1,16 @@
 // src/app/api/onboarding/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
 import { createUser, type OnboardingPayload } from "@/app/lib/api/user.client";
+import { getErrorMessage, sameOriginFailure } from "@/app/lib/api/errors";
 
-export const POST = auth(async (req) => {
+export const POST = serverAuth(async (req) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
+
     const email = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!email) {
       return NextResponse.json(
@@ -38,9 +42,9 @@ export const POST = auth(async (req) => {
     }
 
     return NextResponse.json({ ok: true, data: result.data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

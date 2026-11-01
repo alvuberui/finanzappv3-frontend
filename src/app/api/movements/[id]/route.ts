@@ -1,6 +1,7 @@
 // src/app/api/movements/[id]/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, isValidYmd, sameOriginFailure } from "@/app/lib/api/errors";
 
 type BackendMovementType =
   | "BENEFIT"
@@ -60,21 +61,19 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function isYmd(s: unknown): s is string {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 function parseId(idStr: string) {
   const n = Number(idStr);
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 }
 
 function baseUrl() {
-  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8080";
 }
 
-function getIdFromCtx(ctx: any): string | undefined {
-  const raw = ctx?.params?.id;
+type RouteContext = { params?: Promise<{ id?: string | string[] }> };
+
+async function getIdFromCtx(ctx: RouteContext | undefined): Promise<string | undefined> {
+  const raw = (await ctx?.params)?.id;
   if (typeof raw === "string") return raw;
   if (Array.isArray(raw)) return raw[0];
   return undefined;
@@ -83,10 +82,10 @@ function getIdFromCtx(ctx: any): string | undefined {
 /* =========================
  * GET movement by id
  * ========================= */
-export const GET = auth(async (req, ctx) => {
+export const GET = serverAuth(async (req, ctx: RouteContext) => {
   try {
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -102,7 +101,7 @@ export const GET = auth(async (req, ctx) => {
       );
     }
 
-    const idStr = getIdFromCtx(ctx);
+    const idStr = await getIdFromCtx(ctx);
     const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
@@ -119,29 +118,7 @@ export const GET = auth(async (req, ctx) => {
       cache: "no-store",
     });
 
-    if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
-    }
+    if (!res.ok) return await backendErrorResponse(res, "Error obteniendo el movimiento");
 
     const data = (await res.json()) as BackendMovement;
 
@@ -149,15 +126,15 @@ export const GET = auth(async (req, ctx) => {
       ...data,
       movementType: mapBackendToFront(data.movementType),
       tagId: data.tagId ?? null,
-      tagName: (data as any).tagName ?? null,
-      tagColor: (data as any).tagColor ?? null,
+      tagName: data.tagName ?? null,
+      tagColor: data.tagColor ?? null,
       description: data.description ?? "",
     };
 
     return NextResponse.json({ ok: true, data: mapped }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
@@ -166,10 +143,12 @@ export const GET = auth(async (req, ctx) => {
 /* =========================
  * PUT movement
  * ========================= */
-export const PUT = auth(async (req, ctx) => {
+export const PUT = serverAuth(async (req, ctx: RouteContext) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -185,7 +164,7 @@ export const PUT = auth(async (req, ctx) => {
       );
     }
 
-    const idStr = getIdFromCtx(ctx);
+    const idStr = await getIdFromCtx(ctx);
     const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
@@ -224,7 +203,7 @@ export const PUT = auth(async (req, ctx) => {
       );
     }
 
-    if (!isYmd(date)) {
+    if (!isValidYmd(date)) {
       return NextResponse.json(
         { ok: false, error: { message: "date inválido (formato YYYY-MM-DD)" } },
         { status: 400 }
@@ -274,7 +253,7 @@ export const PUT = auth(async (req, ctx) => {
       ...(Object.prototype.hasOwnProperty.call(body, "tagId")
         ? { tagId: tagId === null ? null : tagId }
         : {}),
-      ...(description?.trim() ? { description: description.trim() } : {}),
+      ...(description !== undefined ? { description: description.trim() } : {}),
     };
 
     const res = await fetch(url, {
@@ -287,29 +266,7 @@ export const PUT = auth(async (req, ctx) => {
       cache: "no-store",
     });
 
-    if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
-    }
+    if (!res.ok) return await backendErrorResponse(res, "Error actualizando el movimiento");
 
     const contentType = res.headers.get("content-type") ?? "";
     const data = contentType.includes("application/json")
@@ -317,9 +274,9 @@ export const PUT = auth(async (req, ctx) => {
       : null;
 
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
@@ -328,10 +285,12 @@ export const PUT = auth(async (req, ctx) => {
 /* =========================
  * DELETE movement
  * ========================= */
-export const DELETE = auth(async (req, ctx) => {
+export const DELETE = serverAuth(async (req, ctx: RouteContext) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -347,7 +306,7 @@ export const DELETE = auth(async (req, ctx) => {
       );
     }
 
-    const idStr = getIdFromCtx(ctx);
+    const idStr = await getIdFromCtx(ctx);
     const id = idStr ? parseId(idStr) : null;
     if (!id) {
       return NextResponse.json(
@@ -364,29 +323,7 @@ export const DELETE = auth(async (req, ctx) => {
       cache: "no-store",
     });
 
-    if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
-    }
+    if (!res.ok) return await backendErrorResponse(res, "Error eliminando el movimiento");
 
     const contentType = res.headers.get("content-type") ?? "";
     const data = contentType.includes("application/json")
@@ -394,9 +331,9 @@ export const DELETE = auth(async (req, ctx) => {
       : null;
 
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

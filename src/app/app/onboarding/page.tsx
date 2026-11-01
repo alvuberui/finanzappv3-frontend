@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { sumMoney } from "@/app/lib/money";
+import { Toast } from "@/app/components/FeedbackUI";
+import { ButtonLoading } from "@/app/components/LoadingUI";
 
 type OnboardingPayload = {
   email: string; // username en back
@@ -41,11 +45,12 @@ const schema = Yup.object({
   monthlyInvestmentPercentage: Yup.number().typeError("Debe ser un número").min(0).max(100).required(),
 }).test("sum-100", "La suma de porcentajes debe ser 100%", (values) => {
   if (!values) return false;
-  const sum =
-    toNumber((values as any).monthlySavingPercentage) +
-    toNumber((values as any).monthlyNecessaryExpensesPercentage) +
-    toNumber((values as any).monthlyDiscretionaryExpensesPercentage) +
-    toNumber((values as any).monthlyInvestmentPercentage);
+  const sum = sumMoney([
+    toNumber((values as Record<string, unknown>).monthlySavingPercentage),
+    toNumber((values as Record<string, unknown>).monthlyNecessaryExpensesPercentage),
+    toNumber((values as Record<string, unknown>).monthlyDiscretionaryExpensesPercentage),
+    toNumber((values as Record<string, unknown>).monthlyInvestmentPercentage),
+  ]);
   return Math.round(sum * 100) / 100 === 100;
 });
 
@@ -53,12 +58,7 @@ export default function OnboardingPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  useEffect(() => {
-    // si quieres forzar que usuarios ya onboarded no entren aquí, lo harás con una llamada al back
-    // o una flag en sesión; de momento no redirigimos.
-  }, []);
-
-  const sessionEmail = (session as any)?.user?.email ?? "";
+  const sessionEmail = session?.user?.email ?? "";
 
   const initialValues = useMemo(
     () => ({
@@ -78,42 +78,9 @@ export default function OnboardingPage() {
 
   const [serverMsg, setServerMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  async function submit(values: typeof initialValues) {
-  setServerMsg(null);
-
-  const payload: OnboardingPayload = {
-    email: values.email.trim(),
-    name: values.name.trim(),
-    lastname: values.lastname.trim(),
-    birthdate: values.birthdate,
-    initialWealth: Number(values.initialWealth),
-    monthlySavingPercentage: Number(values.monthlySavingPercentage),
-    monthlyNecessaryExpensesPercentage: Number(values.monthlyNecessaryExpensesPercentage),
-    monthlyDiscretionaryExpensesPercentage: Number(values.monthlyDiscretionaryExpensesPercentage),
-    monthlyInvestmentPercentage: Number(values.monthlyInvestmentPercentage),
-  };
-
-  const res = await fetch("/api/onboarding", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  // 👇 AQUÍ está la clave
-  const json = await res.json();
-
-  // ❌ Error controlado desde el BFF
-  if (!res.ok || json.ok === false) {
-    throw new Error(json?.error?.message ?? "Error enviando el onboarding");
-  }
-
-  // ✅ Todo OK
-  return json.data;
-}
-
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 flex items-center justify-center px-6 py-14">
-      <div className="w-full max-w-3xl">
+    <main className="app-shell flex min-h-screen items-center justify-center px-4 py-10 text-gray-100 sm:px-6 sm:py-14">
+      <div className="fade-up w-full max-w-3xl">
         <header className="text-center mb-10">
           <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
             Onboarding
@@ -123,7 +90,7 @@ export default function OnboardingPage() {
           </p>
         </header>
 
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg p-6 md:p-8">
+        <div className="surface rounded-[1.75rem] p-6 md:p-8">
           <Formik
             enableReinitialize
             initialValues={initialValues}
@@ -165,10 +132,10 @@ export default function OnboardingPage() {
               // ✅ Redirect + refresh (CLAVE para que el layout server re-chequee isOnboarded)
               router.replace("/app");
               router.refresh();
-            } catch (e: any) {
+            } catch (e: unknown) {
               setServerMsg({
                 type: "err",
-                text: e?.message ?? "Error enviando el onboarding.",
+                text: getErrorMessage(e, "Error enviando el onboarding."),
               });
               helpers.setSubmitting(false);
             }
@@ -272,18 +239,9 @@ export default function OnboardingPage() {
                   </section>
 
                   {/* Feedback servidor */}
-                  {serverMsg && (
-                    <div
-                      className={[
-                        "rounded-2xl border px-4 py-3 text-sm",
-                        serverMsg.type === "ok"
-                          ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                          : "border-amber-400/30 bg-amber-500/10 text-amber-100",
-                      ].join(" ")}
-                    >
-                      {serverMsg.text}
-                    </div>
-                  )}
+                  {serverMsg ? (
+                    <Toast message={serverMsg.text} tone={serverMsg.type === "ok" ? "success" : "error"} onClose={() => setServerMsg(null)} />
+                  ) : null}
 
                   {/* Acciones */}
                   <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
@@ -299,7 +257,7 @@ export default function OnboardingPage() {
                                  disabled:opacity-50 disabled:cursor-not-allowed
                                  [--tw-shadow-color:rgb(var(--brand-primary-rgb)/0.30)]"
                     >
-                      {isSubmitting ? "Guardando…" : "Continuar"}
+                      {isSubmitting ? <ButtonLoading label="Guardando" /> : "Continuar"}
                     </button>
                   </div>
 
@@ -320,7 +278,7 @@ export default function OnboardingPage() {
 }
 
 const inputClass =
-  "w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 outline-none focus:border-[var(--brand-title-from)]";
+  "w-full rounded-2xl border border-white/10 bg-[#081525]/80 px-4 py-3 text-slate-100 shadow-inner shadow-black/10 outline-none placeholder:text-slate-600 transition focus:border-cyan-300/50 focus:bg-[#0b1b31] focus:ring-4 focus:ring-cyan-300/10";
 
 function Labeled({
   name,

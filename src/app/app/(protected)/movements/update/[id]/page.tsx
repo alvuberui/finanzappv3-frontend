@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+import { InlineLoading } from "@/app/components/LoadingUI";
+import { Toast } from "@/app/components/FeedbackUI";
+import { ButtonLoading } from "@/app/components/LoadingUI";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { normalizeHexColor } from "@/app/lib/color";
 
 type MovementType =
   | "BENEFIT"
@@ -64,13 +69,6 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function normalizeHexColor(c?: string | null) {
-  if (!c) return null;
-  const v = c.trim();
-  if (!v) return null;
-  return v.startsWith("#") ? v : `#${v}`;
-}
-
 const movementTypes: { value: MovementType; label: string }[] = [
   { value: "BENEFIT", label: "Ingreso" },
   { value: "ESSENTIAL_EXPENSE", label: "Gasto esencial" },
@@ -113,9 +111,9 @@ const schema = Yup.object({
 
 export default function EditMovementPage() {
   const router = useRouter();
-  const params = useParams();
+  const params = useParams<{ id?: string | string[] }>();
 
-  const idRaw = (params as any)?.id;
+  const idRaw = params?.id;
   const id = typeof idRaw === "string" ? idRaw : Array.isArray(idRaw) ? idRaw[0] : "";
 
   const [loading, setLoading] = useState(true);
@@ -145,8 +143,8 @@ export default function EditMovementPage() {
         }
 
         if (!cancelled) setTags((json.data ?? []) as Tag[]);
-      } catch (e: any) {
-        if (!cancelled) setTagsError(e?.message ?? "Error cargando etiquetas");
+      } catch (e: unknown) {
+        if (!cancelled) setTagsError(getErrorMessage(e, "Error cargando etiquetas"));
       } finally {
         if (!cancelled) setTagsLoading(false);
       }
@@ -179,9 +177,9 @@ export default function EditMovementPage() {
           setMovement(json.data as MovementFromBff);
           setLoading(false);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setLoadErr(e?.message ?? "Error cargando el movimiento");
+          setLoadErr(getErrorMessage(e, "Error cargando el movimiento"));
           setLoading(false);
         }
       }
@@ -223,7 +221,7 @@ export default function EditMovementPage() {
     amount: toNumber(values.amount),
     date: values.date,
     tagId: tagIdParsed ?? null, // <-- siempre number o null
-    ...(values.description.trim() ? { description: values.description.trim() } : {}),
+    description: values.description.trim(),
   };
 
   const res = await fetch(`/api/movements/${id}`, {
@@ -243,8 +241,8 @@ export default function EditMovementPage() {
 
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 flex items-center justify-center px-6 py-14">
-      <div className="w-full max-w-3xl">
+    <main className="app-shell flex min-h-screen items-center justify-center px-4 py-10 text-gray-100 sm:px-6 sm:py-14">
+      <div className="fade-up w-full max-w-3xl">
         <header className="text-center mb-10">
           <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
             Editar movimiento
@@ -252,9 +250,9 @@ export default function EditMovementPage() {
           <p className="mt-3 text-gray-300">Modifica los datos del movimiento.</p>
         </header>
 
-        <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg p-6 md:p-8">
+        <div className="surface rounded-[1.75rem] p-6 md:p-8">
           {loading ? (
-            <div className="text-sm text-gray-300">Cargando…</div>
+            <div className="py-8 text-sm"><InlineLoading label="Cargando movimiento" /></div>
           ) : loadErr ? (
             <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 text-amber-100 px-4 py-3 text-sm">
               {loadErr}
@@ -271,10 +269,10 @@ export default function EditMovementPage() {
                   helpers.setSubmitting(false);
 
                   router.replace("/app");
-                } catch (e: any) {
+                } catch (e: unknown) {
                   setServerMsg({
                     type: "err",
-                    text: e?.message ?? "Error actualizando el movimiento.",
+                    text: getErrorMessage(e, "Error actualizando el movimiento."),
                   });
                   helpers.setSubmitting(false);
                 }
@@ -372,18 +370,9 @@ export default function EditMovementPage() {
                     </section>
 
                     {/* Feedback servidor */}
-                    {serverMsg && (
-                      <div
-                        className={[
-                          "rounded-2xl border px-4 py-3 text-sm",
-                          serverMsg.type === "ok"
-                            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                            : "border-amber-400/30 bg-amber-500/10 text-amber-100",
-                        ].join(" ")}
-                      >
-                        {serverMsg.text}
-                      </div>
-                    )}
+                    {serverMsg ? (
+                      <Toast message={serverMsg.text} tone={serverMsg.type === "ok" ? "success" : "error"} onClose={() => setServerMsg(null)} />
+                    ) : null}
 
                     {/* Acciones */}
                     <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
@@ -396,7 +385,7 @@ export default function EditMovementPage() {
                                    disabled:opacity-50 disabled:cursor-not-allowed
                                    [--tw-shadow-color:rgb(var(--brand-primary-rgb)/0.30)]"
                       >
-                        {isSubmitting ? "Guardando…" : "Guardar cambios"}
+                        {isSubmitting ? <ButtonLoading label="Guardando" /> : "Guardar cambios"}
                       </button>
                     </div>
                   </Form>
@@ -411,7 +400,7 @@ export default function EditMovementPage() {
 }
 
 const inputClass =
-  "w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 outline-none focus:border-[var(--brand-title-from)]";
+  "w-full rounded-2xl border border-white/10 bg-[#081525]/80 px-4 py-3 text-slate-100 shadow-inner shadow-black/10 outline-none placeholder:text-slate-600 transition focus:border-cyan-300/50 focus:bg-[#0b1b31] focus:ring-4 focus:ring-cyan-300/10";
 
 function Labeled({
   name,
