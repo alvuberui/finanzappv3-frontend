@@ -1,6 +1,7 @@
 // src/app/api/ideal-percentage/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage } from "@/app/lib/api/errors";
 
 type IdealPercentage = {
   monthlySavingPercentage: number;
@@ -9,10 +10,10 @@ type IdealPercentage = {
   monthlyInvestmentPercentage: number;
 };
 
-export const GET = auth(async (req) => {
+export const GET = serverAuth(async (req) => {
   try {
     const email = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!email) {
       return NextResponse.json(
@@ -28,7 +29,7 @@ export const GET = auth(async (req) => {
       );
     }
 
-    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+    const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8080";
     const url = `${baseUrl}/user/users/idealPercentage`;
 
     const res = await fetch(url, {
@@ -40,25 +41,14 @@ export const GET = auth(async (req) => {
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: `Backend error (${res.status})`,
-            details: text || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error obteniendo los porcentajes ideales");
     }
 
     const data = (await res.json()) as IdealPercentage;
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

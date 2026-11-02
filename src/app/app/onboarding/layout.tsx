@@ -1,15 +1,15 @@
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
 import { redirect } from "next/navigation";
 
 export default async function OnboardingLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
+  const session = await serverAuth();
 
   // No autenticado => fuera
   if (!session?.user?.email) redirect("/?callbackUrl=/app/onboarding");
 
   // sesión rota => fuera
-  const tokenError = (session as any).tokenError;
-  const accessToken = (session as any).accessToken as string | undefined;
+  const tokenError = session?.tokenError;
+  const accessToken = session?.accessToken;
   if (tokenError || !accessToken) redirect("/?callbackUrl=/app/onboarding");
 
   const apigateway = process.env.API_GATEWAY_URL;

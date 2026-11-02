@@ -1,6 +1,7 @@
 // src/app/api/tags/[id]/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, sameOriginFailure } from "@/app/lib/api/errors";
 
 function parseId(idStr: string) {
   const n = Number(idStr);
@@ -8,17 +9,26 @@ function parseId(idStr: string) {
 }
 
 function backendUrl(path: string) {
-  const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+  const baseUrl = process.env.API_GATEWAY_URL ?? "http://localhost:8080";
   return `${baseUrl}${path}`;
+}
+
+type RouteContext = { params?: Promise<{ id?: string | string[] }> };
+
+async function getIdFromCtx(ctx: RouteContext | undefined): Promise<string | undefined> {
+  const raw = (await ctx?.params)?.id;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw[0];
+  return undefined;
 }
 
 /* =========================
  * GET tag by id
  * ========================= */
-export const GET = auth(async (req, ctx) => {
+export const GET = serverAuth(async (req, ctx: RouteContext) => {
   try {
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -34,8 +44,7 @@ export const GET = auth(async (req, ctx) => {
       );
     }
 
-    const params = (ctx as any)?.params;
-    const idStr = params?.id as string | undefined;
+    const idStr = await getIdFromCtx(ctx);
 
     const id = idStr ? parseId(idStr) : null;
     if (!id) {
@@ -54,34 +63,14 @@ export const GET = auth(async (req, ctx) => {
     });
 
     if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error obteniendo la etiqueta");
     }
 
     const data = await res.json();
     return NextResponse.json({ ok: true, data }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
@@ -90,10 +79,12 @@ export const GET = auth(async (req, ctx) => {
 /* =========================
  * DELETE tag
  * ========================= */
-export const DELETE = auth(async (req, ctx) => {
+export const DELETE = serverAuth(async (req, ctx: RouteContext) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
     const userEmail = req.auth?.user?.email;
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
 
     if (!userEmail) {
       return NextResponse.json(
@@ -109,8 +100,7 @@ export const DELETE = auth(async (req, ctx) => {
       );
     }
 
-    const params = (ctx as any)?.params;
-    const idStr = params?.id as string | undefined;
+    const idStr = await getIdFromCtx(ctx);
 
     const id = idStr ? parseId(idStr) : null;
     if (!id) {
@@ -129,33 +119,13 @@ export const DELETE = auth(async (req, ctx) => {
     });
 
     if (!res.ok) {
-      const contentType = res.headers.get("content-type") ?? "";
-      const backendBody = contentType.includes("application/json")
-        ? await res.json().catch(() => null)
-        : await res.text().catch(() => "");
-
-      const backendMessage =
-        backendBody && typeof backendBody === "object"
-          ? (backendBody as any).message
-          : undefined;
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: backendMessage ?? `Backend error (${res.status})`,
-            backend: backendBody || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
+      return await backendErrorResponse(res, "Error eliminando la etiqueta");
     }
 
     return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }

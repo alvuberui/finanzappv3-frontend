@@ -3,6 +3,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { subtractMoney, sumMoney } from "@/app/lib/money";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { normalizeHexColor } from "@/app/lib/color";
+import { InlineLoading } from "@/app/components/LoadingUI";
+import { ConfirmDialog, Toast } from "@/app/components/FeedbackUI";
 import {
   ResponsiveContainer,
   BarChart,
@@ -12,8 +17,6 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
-  LineChart,
-  Line,
 } from "recharts";
 
 type ViewMode = "monthly" | "yearly" | "historic";
@@ -63,10 +66,14 @@ const metricOptions = [
 
 type MetricKey = (typeof metricOptions)[number]["key"];
 
+function isMetricKey(value: string): value is MetricKey {
+  return metricOptions.some((option) => option.key === value);
+}
+
 const inputClass =
-  "w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 outline-none focus:border-[var(--brand-title-from)]";
+  "w-full rounded-2xl border border-white/10 bg-[#081525]/80 px-4 py-3 text-slate-100 shadow-inner shadow-black/10 outline-none placeholder:text-slate-600 transition focus:border-cyan-300/50 focus:bg-[#0b1b31] focus:ring-4 focus:ring-cyan-300/10";
 const cardClass =
-  "bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg";
+  "surface rounded-[1.75rem]";
 
 function formatEUR(n: number) {
   try {
@@ -93,13 +100,6 @@ function chipType(type: MovementType) {
     case "inversion":
       return `${base} border-violet-400/30 bg-violet-500/10 text-violet-200`;
   }
-}
-
-function normalizeHexColor(c?: string | null) {
-  if (!c) return null;
-  const v = c.trim();
-  if (!v) return null;
-  return v.startsWith("#") ? v : `#${v}`;
 }
 
 function TagChip({ name, color }: { name?: string; color?: string }) {
@@ -282,6 +282,9 @@ export default function TagDashboardPage() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(false);
   const [movementsError, setMovementsError] = useState<string | null>(null);
+  const [deletingMovementId, setDeletingMovementId] = useState<string | null>(null);
+  const [confirmMovementId, setConfirmMovementId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   // Anual
   const [annualYear, setAnnualYear] = useState<number>(currentYear);
@@ -300,12 +303,6 @@ export default function TagDashboardPage() {
   );
   const [loadingHistorical, setLoadingHistorical] = useState(false);
   const [historicalError, setHistoricalError] = useState<string | null>(null);
-
-  // Ideal fijo (si quieres, lo sustituimos luego por /api/ideal-percentage)
-  const monthlyIdealPercent = useMemo(
-    () => ({ ahorro: 20, gasto_necesario: 50, gasto_innecesario: 20, inversion: 10 }),
-    []
-  );
 
   // --------------------------
   // Cargar TAG real
@@ -335,9 +332,9 @@ export default function TagDashboardPage() {
             color: data.color ?? "#64748B",
           });
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setTagError(e?.message ?? "Error");
+          setTagError(getErrorMessage(e, "Error"));
           setTag({
             id: tagId,
             name: `Etiqueta #${tagId}`,
@@ -398,9 +395,9 @@ useEffect(() => {
       }));
 
       if (!cancelled) setMovements(mapped);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (!cancelled) {
-        setMovementsError(e?.message ?? "Error");
+        setMovementsError(getErrorMessage(e, "Error"));
         setMovements([]);
       }
     } finally {
@@ -459,9 +456,9 @@ useEffect(() => {
             })) ?? [];
 
         if (!cancelled) setAnnualData(mapped);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setAnnualError(e?.message ?? "Error");
+          setAnnualError(getErrorMessage(e, "Error"));
           setAnnualData([]);
         }
       } finally {
@@ -515,9 +512,9 @@ useEffect(() => {
             })) ?? [];
 
         if (!cancelled) setHistoricalRaw(mapped);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setHistoricalError(e?.message ?? "Error");
+          setHistoricalError(getErrorMessage(e, "Error"));
           setHistoricalRaw([]);
         }
       } finally {
@@ -544,27 +541,54 @@ useEffect(() => {
     const years = historicalRaw.map((p) => p.year);
     const min = Math.min(...years);
     const max = Math.max(...years);
+    // El rango seleccionado se inicializa al recibir el histórico.
+    // La actualización depende de datos recibidos de una petición externa.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistoricFromYear(min);
     setHistoricToYear(max);
   }, [historicalRaw]);
 
   const monthlyMovements = movements;
 
+  async function onDeleteMovement(id: string) {
+    setDeletingMovementId(id);
+    try {
+      const res = await fetch(`/api/movements/${id}`, { method: "DELETE" });
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error?.message ?? "Error eliminando movimiento");
+      }
+
+      setMovements((previous) => previous.filter((movement) => movement.id !== id));
+      setFeedback({ tone: "success", text: "Movimiento eliminado correctamente." });
+    } catch (error: unknown) {
+      setFeedback({ tone: "error", text: getErrorMessage(error, "Error eliminando movimiento") });
+    } finally {
+      setDeletingMovementId(null);
+      setConfirmMovementId(null);
+    }
+  }
+
   const monthlyTotals = useMemo(() => {
-    let benefit = 0;
-    let essential = 0;
-    let discretionary = 0;
-    let investment = 0;
+    const benefits: number[] = [];
+    const essentials: number[] = [];
+    const discretionaryExpenses: number[] = [];
+    const investments: number[] = [];
 
     for (const mv of monthlyMovements) {
-      if (mv.type === "beneficio") benefit += mv.amount;
-      if (mv.type === "gasto_necesario") essential += mv.amount;
-      if (mv.type === "gasto_innecesario") discretionary += mv.amount;
-      if (mv.type === "inversion") investment += mv.amount;
+      if (mv.type === "beneficio") benefits.push(mv.amount);
+      if (mv.type === "gasto_necesario") essentials.push(mv.amount);
+      if (mv.type === "gasto_innecesario") discretionaryExpenses.push(mv.amount);
+      if (mv.type === "inversion") investments.push(mv.amount);
     }
 
-    const gastosTotales = essential + discretionary;
-    const ahorros = Math.max(0, benefit - gastosTotales - investment);
+    const benefit = sumMoney(benefits);
+    const essential = sumMoney(essentials);
+    const discretionary = sumMoney(discretionaryExpenses);
+    const investment = sumMoney(investments);
+    const gastosTotales = sumMoney([essential, discretionary]);
+    const ahorros = Math.max(0, subtractMoney(benefit, gastosTotales, investment));
 
     return {
       beneficio: benefit,
@@ -579,14 +603,6 @@ useEffect(() => {
   const monthlyIncome = monthlyTotals.beneficio || 0;
 
   const monthlyChartData = useMemo(() => {
-    const income = monthlyIncome;
-
-    const idealNecesarios = (income * monthlyIdealPercent.gasto_necesario) / 100;
-    const idealInnecesarios = (income * monthlyIdealPercent.gasto_innecesario) / 100;
-    const idealInversion = (income * monthlyIdealPercent.inversion) / 100;
-    const idealAhorro = (income * monthlyIdealPercent.ahorro) / 100;
-    const idealGastosTotales = idealNecesarios + idealInnecesarios;
-
     return [
       { tipo: "Beneficio", real: monthlyTotals.beneficio },
       { tipo: "Gastos necesarios", real: monthlyTotals.gastos_necesarios },
@@ -596,7 +612,7 @@ useEffect(() => {
       { tipo: "Ahorros", real: monthlyTotals.ahorros },
     ];
 
-  }, [monthlyIncome, monthlyIdealPercent, monthlyTotals]);
+  }, [monthlyTotals]);
 
   const historicChartData = useMemo(() => {
     const from = Math.min(historicFromYear, historicToYear);
@@ -612,8 +628,8 @@ useEffect(() => {
   }, [historicalRaw, historicFromYear, historicToYear]);
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 px-6 py-12">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <main className="app-shell px-4 py-8 text-gray-100 sm:px-6 lg:px-8 lg:py-12">
+      <div className="fade-up mx-auto max-w-7xl space-y-8">
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
@@ -637,7 +653,7 @@ useEffect(() => {
             </p>
 
             {loadingTag ? (
-              <p className="text-xs text-gray-400 mt-2">Cargando etiqueta...</p>
+              <p className="mt-2 text-xs"><InlineLoading label="Cargando etiqueta" /></p>
             ) : tagError ? (
               <p className="text-xs text-amber-200 mt-2">Etiqueta: {tagError}</p>
             ) : null}
@@ -667,7 +683,7 @@ useEffect(() => {
                 </p>
 
                 {loadingMovements ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando movimientos...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando movimientos" /></p>
                 ) : movementsError ? (
                   <p className="text-xs text-red-300 mt-2">Movimientos: {movementsError}</p>
                 ) : null}
@@ -734,7 +750,7 @@ useEffect(() => {
                       <XAxis dataKey="tipo" tick={{ fill: "#E5E7EB" }} />
                       <YAxis tick={{ fill: "#E5E7EB" }} />
                       <Tooltip
-                        formatter={(v: any) => formatEUR(Number(v))}
+                        formatter={(v: unknown) => formatEUR(Number(v))}
                         contentStyle={{
                           background: "rgba(15, 23, 42, 0.95)",
                           border: "1px solid rgba(255,255,255,0.12)",
@@ -797,9 +813,10 @@ useEffect(() => {
                             <button
                               type="button"
                               className="rounded-xl border border-red-400/30 bg-red-500/10 text-red-200 px-3 py-2 text-sm hover:bg-red-500/20 transition"
-                              onClick={() => alert("TODO: implementa delete aquí si quieres")}
+                              onClick={() => setConfirmMovementId(mv.id)}
+                              disabled={deletingMovementId === mv.id}
                             >
-                              Eliminar
+                              {deletingMovementId === mv.id ? "Eliminando…" : "Eliminar"}
                             </button>
                           </div>
                         </td>
@@ -831,7 +848,7 @@ useEffect(() => {
 </p>
 
                 {loadingAnnual ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando anual...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando vista anual" /></p>
                 ) : annualError ? (
                   <p className="text-xs text-red-300 mt-2">Anual: {annualError}</p>
                 ) : null}
@@ -847,7 +864,9 @@ useEffect(() => {
                 <Select
                   label="Qué ver"
                   value={annualMetric}
-                  onChange={(v) => setAnnualMetric(v as any)}
+                  onChange={(v) => {
+                    if (isMetricKey(v)) setAnnualMetric(v);
+                  }}
                   options={metricOptions.map((m) => ({ value: m.key, label: m.label }))}
                 />
               </div>
@@ -865,7 +884,7 @@ useEffect(() => {
                     <XAxis dataKey="mes" tick={{ fill: "#E5E7EB" }} />
                     <YAxis tick={{ fill: "#E5E7EB" }} />
                     <Tooltip
-                      formatter={(v: any) => formatEUR(Number(v))}
+                      formatter={(v: unknown) => formatEUR(Number(v))}
                       contentStyle={{
                         background: "rgba(15, 23, 42, 0.95)",
                         border: "1px solid rgba(255,255,255,0.12)",
@@ -893,7 +912,7 @@ useEffect(() => {
                   Línea por año real.
                 </p>
                 {loadingHistorical ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando histórico...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando histórico" /></p>
                 ) : historicalError ? (
                   <p className="text-xs text-red-300 mt-2">Histórico: {historicalError}</p>
                 ) : null}
@@ -915,7 +934,9 @@ useEffect(() => {
                 <Select
                   label="Qué ver"
                   value={historicMetric}
-                  onChange={(v) => setHistoricMetric(v as any)}
+                  onChange={(v) => {
+                    if (isMetricKey(v)) setHistoricMetric(v);
+                  }}
                   options={metricOptions.map((m) => ({ value: m.key, label: m.label }))}
                 />
               </div>
@@ -933,7 +954,7 @@ useEffect(() => {
                     <XAxis dataKey="year" tick={{ fill: "#E5E7EB" }} />
                     <YAxis tick={{ fill: "#E5E7EB" }} />
                     <Tooltip
-                      formatter={(v: any) => formatEUR(Number(v))}
+                      formatter={(v: unknown) => formatEUR(Number(v))}
                       contentStyle={{
                         background: "rgba(15, 23, 42, 0.95)",
                         border: "1px solid rgba(255,255,255,0.12)",
@@ -950,6 +971,19 @@ useEffect(() => {
             </div>
           </section>
         ) : null}
+
+        {feedback ? <Toast message={feedback.text} tone={feedback.tone} onClose={() => setFeedback(null)} /> : null}
+
+        <ConfirmDialog
+          open={confirmMovementId !== null}
+          title="¿Eliminar este movimiento?"
+          description="El movimiento desaparecerá de esta etiqueta y esta acción no se puede deshacer."
+          loading={confirmMovementId !== null && deletingMovementId === confirmMovementId}
+          onCancel={() => setConfirmMovementId(null)}
+          onConfirm={() => {
+            if (confirmMovementId) void onDeleteMovement(confirmMovementId);
+          }}
+        />
 
         <p className="text-center text-xs text-gray-500">
           Datos basados en tus movimientos (etiquetados). No constituyen asesoramiento financiero.

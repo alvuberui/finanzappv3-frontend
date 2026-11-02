@@ -2,6 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { normalizeHexColor } from "@/app/lib/color";
+import { InlineLoading } from "@/app/components/LoadingUI";
+import { ConfirmDialog, Toast } from "@/app/components/FeedbackUI";
 
 type Tag = {
   id: number;
@@ -10,7 +14,7 @@ type Tag = {
 };
 
 const cardClass =
-  "bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg";
+  "surface rounded-[1.75rem]";
 
 export default function TagsPage() {
   const router = useRouter();
@@ -19,6 +23,7 @@ export default function TagsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmTag, setConfirmTag] = useState<{ id: number; name: string } | null>(null);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(
     null
   );
@@ -36,23 +41,21 @@ export default function TagsPage() {
       }
 
       setTags((json.data ?? []) as Tag[]);
-    } catch (e: any) {
-      setError(e?.message ?? "Error");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error"));
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    // La petición externa actualiza el estado cuando termina.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadTags();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function onDeleteTag(id: number, name: string) {
+  async function onDeleteTag(id: number) {
     setMsg(null);
-    const ok = window.confirm(`¿Eliminar la etiqueta "${name}"?`);
-    if (!ok) return;
-
     setDeletingId(id);
 
     try {
@@ -65,35 +68,26 @@ export default function TagsPage() {
 
       setTags((prev) => prev.filter((t) => t.id !== id));
       setMsg({ type: "ok", text: "Etiqueta eliminada correctamente." });
-    } catch (e: any) {
-      setMsg({ type: "err", text: e?.message ?? "Error eliminando etiqueta." });
+    } catch (e: unknown) {
+      setMsg({ type: "err", text: getErrorMessage(e, "Error eliminando etiqueta.") });
     } finally {
       setDeletingId(null);
+      setConfirmTag(null);
     }
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 px-6 py-12">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <main className="app-shell px-4 py-8 text-gray-100 sm:px-6 lg:px-8 lg:py-12">
+      <div className="fade-up mx-auto max-w-6xl space-y-8">
         <header>
           <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
             Etiquetas
           </h1>
           <p className="mt-2 text-gray-300">Lista de etiquetas creadas por el usuario.</p>
 
-          {loading && <p className="text-xs text-gray-400 mt-2">Cargando...</p>}
+          {loading && <p className="mt-2 text-xs"><InlineLoading label="Cargando etiquetas" /></p>}
           {error && <p className="text-xs text-red-300 mt-2">{error}</p>}
-          {msg && (
-            <div
-              className={`mt-3 inline-block rounded-2xl border px-4 py-2 text-xs ${
-                msg.type === "ok"
-                  ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                  : "border-amber-400/30 bg-amber-500/10 text-amber-100"
-              }`}
-            >
-              {msg.text}
-            </div>
-          )}
+          {msg && <Toast message={msg.text} tone={msg.type === "ok" ? "success" : "error"} onClose={() => setMsg(null)} />}
         </header>
 
         <section className={`${cardClass} overflow-hidden`}>
@@ -139,7 +133,7 @@ export default function TagsPage() {
                     <span className="inline-flex items-center gap-2">
                       <span
                         className="h-3 w-3 rounded-full border border-white/20"
-                        style={{ backgroundColor: t.color }}
+                        style={{ backgroundColor: normalizeHexColor(t.color) ?? "transparent" }}
                       />
                       <span className="text-xs">{t.color}</span>
                     </span>
@@ -149,7 +143,7 @@ export default function TagsPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation(); // ✅ evita que navegue al hacer click en Eliminar
-                        onDeleteTag(t.id, t.name);
+                        setConfirmTag({ id: t.id, name: t.name });
                       }}
                       disabled={deletingId === t.id}
                       className="
@@ -174,6 +168,17 @@ export default function TagsPage() {
             </tbody>
           </table>
         </section>
+
+        <ConfirmDialog
+          open={confirmTag !== null}
+          title="¿Eliminar esta etiqueta?"
+          description={confirmTag ? `Se eliminará «${confirmTag.name}». Esta acción no se puede deshacer.` : ""}
+          loading={confirmTag !== null && deletingId === confirmTag.id}
+          onCancel={() => setConfirmTag(null)}
+          onConfirm={() => {
+            if (confirmTag) void onDeleteTag(confirmTag.id);
+          }}
+        />
       </div>
     </main>
   );

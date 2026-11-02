@@ -2,10 +2,9 @@
 export type ApiError = {
   code?: string;
   message: string;
-  details?: any;
 };
 
-export type HttpResult<T = any> =
+export type HttpResult<T = unknown> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; error: ApiError };
 
@@ -17,7 +16,7 @@ type RequestOpts = {
   body?: unknown;
 };
 
-export async function httpRequest<T = any>(
+export async function httpRequest<T = unknown>(
   opts: RequestOpts
 ): Promise<HttpResult<T>> {
   const res = await fetch(`${opts.baseUrl}${opts.path}`, {
@@ -44,7 +43,6 @@ export async function httpRequest<T = any>(
           status: res.status,
           error: {
             message: json.message ?? "Error inesperado",
-            details: json,
           },
         };
       } catch {
@@ -64,11 +62,11 @@ export async function httpRequest<T = any>(
   // ✅ OK
   if (contentType.includes("application/json")) {
     try {
-      return { ok: true, status: res.status, data: JSON.parse(raw) };
+      return { ok: true, status: res.status, data: JSON.parse(raw) as T };
     } catch {
-      return { ok: true, status: res.status, data: raw as any };
+      return { ok: true, status: res.status, data: raw as T };
     }
   }
 
-  return { ok: true, status: res.status, data: raw as any };
+  return { ok: true, status: res.status, data: raw as T };
 }

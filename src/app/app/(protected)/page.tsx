@@ -3,6 +3,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { percentageMoney, subtractMoney, sumMoney } from "@/app/lib/money";
+import { getErrorMessage } from "@/app/lib/api/errors";
+import { normalizeHexColor } from "@/app/lib/color";
+import { InlineLoading } from "@/app/components/LoadingUI";
+import { ConfirmDialog, Toast } from "@/app/components/FeedbackUI";
 import {
   ResponsiveContainer,
   BarChart,
@@ -110,10 +115,14 @@ const metricOptions = [
 
 type MetricKey = (typeof metricOptions)[number]["key"];
 
+function isMetricKey(value: string): value is MetricKey {
+  return metricOptions.some((option) => option.key === value);
+}
+
 const inputClass =
-  "w-full rounded-xl bg-black/30 border border-white/10 px-4 py-3 outline-none focus:border-[var(--brand-title-from)]";
+  "w-full rounded-2xl border border-white/10 bg-[#081525]/80 px-4 py-3 text-slate-100 shadow-inner shadow-black/10 outline-none placeholder:text-slate-600 transition focus:border-cyan-300/50 focus:bg-[#0b1b31] focus:ring-4 focus:ring-cyan-300/10";
 const cardClass =
-  "bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl shadow-lg";
+  "surface rounded-[1.75rem]";
 
 function formatEUR(n: number) {
   try {
@@ -220,13 +229,6 @@ function metricKeyToBackend(metric: MetricKey): AnnualMetricBackend {
   }
 }
 
-function normalizeHexColor(c?: string | null) {
-  if (!c) return null;
-  const v = c.trim();
-  if (!v) return null;
-  return v.startsWith("#") ? v : `#${v}`;
-}
-
 function TagChip({ name, color }: { name?: string; color?: string }) {
   if (!name) return <span className="text-gray-500">—</span>;
 
@@ -277,10 +279,11 @@ export default function AppDashboardPage() {
 
   // Feedback global (acciones: delete)
   const [actionMsg, setActionMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [confirmMovementId, setConfirmMovementId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function loadYears() {
       try {
@@ -311,9 +314,9 @@ export default function AppDashboardPage() {
             setHistoricToYear(last);
           }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setYearsError(e?.message ?? "Error");
+          setYearsError(getErrorMessage(e, "Error"));
           setAvailableYears([]);
         }
       } finally {
@@ -336,7 +339,7 @@ export default function AppDashboardPage() {
   const [idealError, setIdealError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function loadIdeal() {
       try {
@@ -354,8 +357,8 @@ export default function AppDashboardPage() {
 
         const d = json.data as IdealPercentageResponse;
         if (!cancelled) setMonthlyIdealPercent(normalizeIdeal(d));
-      } catch (e: any) {
-        if (!cancelled) setIdealError(e?.message ?? "Error");
+      } catch (e: unknown) {
+        if (!cancelled) setIdealError(getErrorMessage(e, "Error"));
       } finally {
         if (!cancelled) setLoadingIdeal(false);
       }
@@ -398,7 +401,7 @@ export default function AppDashboardPage() {
   }
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function run() {
       try {
@@ -430,8 +433,8 @@ export default function AppDashboardPage() {
         }));
 
         if (!cancelled) setMovements(mapped);
-      } catch (e: any) {
-        if (!cancelled) setMovementsError(e?.message ?? "Error");
+      } catch (e: unknown) {
+        if (!cancelled) setMovementsError(getErrorMessage(e, "Error"));
         if (!cancelled) setMovements([]);
       } finally {
         if (!cancelled) setLoadingMovements(false);
@@ -448,9 +451,6 @@ export default function AppDashboardPage() {
 
   async function onDeleteMovement(id: string) {
     setActionMsg(null);
-
-    const ok = window.confirm("¿Eliminar este movimiento? Esta acción no se puede deshacer.");
-    if (!ok) return;
 
     setDeletingId(id);
     try {
@@ -472,29 +472,34 @@ export default function AppDashboardPage() {
       }
 
       setActionMsg({ type: "ok", text: "Movimiento eliminado correctamente." });
-    } catch (e: any) {
-      setActionMsg({ type: "err", text: e?.message ?? "Error eliminando movimiento." });
+    } catch (e: unknown) {
+      setActionMsg({ type: "err", text: getErrorMessage(e, "Error eliminando movimiento.") });
     } finally {
       setDeletingId(null);
+      setConfirmMovementId(null);
     }
   }
 
   // Totales mensual
   const monthlyTotals = useMemo(() => {
-    let benefit = 0;
-    let essential = 0;
-    let discretionary = 0;
-    let investment = 0;
+    const benefits: number[] = [];
+    const essentials: number[] = [];
+    const discretionaryExpenses: number[] = [];
+    const investments: number[] = [];
 
     for (const mv of movements) {
-      if (mv.type === "beneficio") benefit += mv.amount;
-      if (mv.type === "gasto_necesario") essential += mv.amount;
-      if (mv.type === "gasto_innecesario") discretionary += mv.amount;
-      if (mv.type === "inversion") investment += mv.amount;
+      if (mv.type === "beneficio") benefits.push(mv.amount);
+      if (mv.type === "gasto_necesario") essentials.push(mv.amount);
+      if (mv.type === "gasto_innecesario") discretionaryExpenses.push(mv.amount);
+      if (mv.type === "inversion") investments.push(mv.amount);
     }
 
-    const gastosTotales = essential + discretionary;
-    const ahorros = Math.max(0, benefit - gastosTotales - investment);
+    const benefit = sumMoney(benefits);
+    const essential = sumMoney(essentials);
+    const discretionary = sumMoney(discretionaryExpenses);
+    const investment = sumMoney(investments);
+    const gastosTotales = sumMoney([essential, discretionary]);
+    const ahorros = Math.max(0, subtractMoney(benefit, gastosTotales, investment));
 
     return {
       beneficio: benefit,
@@ -511,11 +516,11 @@ export default function AppDashboardPage() {
   const monthlyChartData = useMemo(() => {
     const income = monthlyIncome;
 
-    const idealNecesarios = (income * monthlyIdealPercent.gasto_necesario) / 100;
-    const idealInnecesarios = (income * monthlyIdealPercent.gasto_innecesario) / 100;
-    const idealInversion = (income * monthlyIdealPercent.inversion) / 100;
-    const idealAhorro = (income * monthlyIdealPercent.ahorro) / 100;
-    const idealGastosTotales = idealNecesarios + idealInnecesarios;
+    const idealNecesarios = percentageMoney(income, monthlyIdealPercent.gasto_necesario);
+    const idealInnecesarios = percentageMoney(income, monthlyIdealPercent.gasto_innecesario);
+    const idealInversion = percentageMoney(income, monthlyIdealPercent.inversion);
+    const idealAhorro = percentageMoney(income, monthlyIdealPercent.ahorro);
+    const idealGastosTotales = sumMoney([idealNecesarios, idealInnecesarios]);
 
     return [
       { tipo: "Beneficio", ideal: income, real: monthlyTotals.beneficio },
@@ -535,7 +540,7 @@ export default function AppDashboardPage() {
   const [annualError, setAnnualError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function loadAnnual() {
       try {
@@ -567,8 +572,8 @@ export default function AppDashboardPage() {
           }));
 
         if (!cancelled) setAnnualData(mapped);
-      } catch (e: any) {
-        if (!cancelled) setAnnualError(e?.message ?? "Error");
+      } catch (e: unknown) {
+        if (!cancelled) setAnnualError(getErrorMessage(e, "Error"));
         if (!cancelled) setAnnualData([]);
       } finally {
         if (!cancelled) setLoadingAnnual(false);
@@ -586,7 +591,7 @@ export default function AppDashboardPage() {
   const [historicalError, setHistoricalError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancelled = false;
 
     async function loadHistorical() {
       try {
@@ -617,8 +622,8 @@ export default function AppDashboardPage() {
           }));
 
         if (!cancelled) setHistoricalRaw(mapped);
-      } catch (e: any) {
-        if (!cancelled) setHistoricalError(e?.message ?? "Error");
+      } catch (e: unknown) {
+        if (!cancelled) setHistoricalError(getErrorMessage(e, "Error"));
         if (!cancelled) setHistoricalRaw([]);
       } finally {
         if (!cancelled) setLoadingHistorical(false);
@@ -644,11 +649,12 @@ export default function AppDashboardPage() {
   const yearsForSelect = availableYears.length > 0 ? availableYears : [currentYear];
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-black text-gray-100 px-6 py-12">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <main className="app-shell text-gray-100 px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+      <div className="fade-up mx-auto max-w-7xl space-y-8">
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-[var(--brand-title-from)] to-[var(--brand-title-to)]">
+            <p className="eyebrow mb-3">Tu visión financiera</p>
+            <h1 className="page-title text-4xl font-black tracking-tight md:text-6xl">
               Dashboard
             </h1>
             <p className="mt-2 text-gray-300">
@@ -656,34 +662,23 @@ export default function AppDashboardPage() {
             </p>
 
             {loadingYears ? (
-              <p className="text-xs text-gray-400 mt-2">Cargando años...</p>
+              <p className="mt-2 text-xs"><InlineLoading label="Preparando años" /></p>
             ) : yearsError ? (
               <p className="text-xs text-red-300 mt-2">Años: {yearsError}</p>
             ) : null}
 
             {loadingIdeal ? (
-              <p className="text-xs text-gray-400 mt-1">Cargando porcentajes ideales...</p>
+              <p className="mt-1 text-xs"><InlineLoading label="Preparando objetivos" /></p>
             ) : idealError ? (
               <p className="text-xs text-amber-200 mt-1">
                 IdealPercentage: {idealError} (usando fallback)
               </p>
             ) : null}
 
-            {actionMsg ? (
-              <div
-                className={[
-                  "mt-3 inline-block rounded-2xl border px-4 py-2 text-xs",
-                  actionMsg.type === "ok"
-                    ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200"
-                    : "border-amber-400/30 bg-amber-500/10 text-amber-100",
-                ].join(" ")}
-              >
-                {actionMsg.text}
-              </div>
-            ) : null}
+            {actionMsg ? <Toast message={actionMsg.text} tone={actionMsg.type === "ok" ? "success" : "error"} onClose={() => setActionMsg(null)} /> : null}
           </div>
 
-          <div className={`${cardClass} p-2 flex gap-2`}>
+          <div className={`${cardClass} flex gap-1 p-1.5`}>
             <TabButton active={mode === "monthly"} onClick={() => setMode("monthly")}>
               Mensual
             </TabButton>
@@ -707,7 +702,7 @@ export default function AppDashboardPage() {
                 </p>
 
                 {loadingMovements ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando movimientos...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando movimientos" /></p>
                 ) : movementsError ? (
                   <p className="text-xs text-red-300 mt-2">Movimientos: {movementsError}</p>
                 ) : null}
@@ -775,7 +770,7 @@ export default function AppDashboardPage() {
                       <XAxis dataKey="tipo" tick={{ fill: "#E5E7EB" }} />
                       <YAxis tick={{ fill: "#E5E7EB" }} />
                       <Tooltip
-                        formatter={(v: any) => formatEUR(Number(v))}
+                        formatter={(v: unknown) => formatEUR(Number(v))}
                         contentStyle={{
                           background: "rgba(15, 23, 42, 0.95)",
                           border: "1px solid rgba(255,255,255,0.12)",
@@ -840,7 +835,7 @@ export default function AppDashboardPage() {
                               Editar
                             </IconButton>
                             <IconButton
-                              onClick={() => onDeleteMovement(mv.id)}
+                              onClick={() => setConfirmMovementId(mv.id)}
                               title="Eliminar"
                               variant="danger"
                               disabled={deletingId === mv.id}
@@ -875,7 +870,7 @@ export default function AppDashboardPage() {
                   Compara por mes <span className="font-semibold">real vs ideal</span>.
                 </p>
                 {loadingAnnual ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando anual...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando vista anual" /></p>
                 ) : annualError ? (
                   <p className="text-xs text-red-300 mt-2">Anual: {annualError}</p>
                 ) : null}
@@ -891,7 +886,9 @@ export default function AppDashboardPage() {
                 <Select
                   label="Qué ver"
                   value={annualMetric}
-                  onChange={(v) => setAnnualMetric(v as any)}
+                  onChange={(v) => {
+                    if (isMetricKey(v)) setAnnualMetric(v);
+                  }}
                   options={metricOptions.map((m) => ({ value: m.key, label: m.label }))}
                 />
               </div>
@@ -909,7 +906,7 @@ export default function AppDashboardPage() {
                     <XAxis dataKey="mes" tick={{ fill: "#E5E7EB" }} />
                     <YAxis tick={{ fill: "#E5E7EB" }} />
                     <Tooltip
-                      formatter={(v: any) => formatEUR(Number(v))}
+                      formatter={(v: unknown) => formatEUR(Number(v))}
                       contentStyle={{
                         background: "rgba(15, 23, 42, 0.95)",
                         border: "1px solid rgba(255,255,255,0.12)",
@@ -938,7 +935,7 @@ export default function AppDashboardPage() {
                   Línea con puntos por año: ideal vs real (backend).
                 </p>
                 {loadingHistorical ? (
-                  <p className="text-xs text-gray-400 mt-2">Cargando histórico...</p>
+                  <p className="mt-2 text-xs"><InlineLoading label="Cargando histórico" /></p>
                 ) : historicalError ? (
                   <p className="text-xs text-red-300 mt-2">Histórico: {historicalError}</p>
                 ) : null}
@@ -960,7 +957,9 @@ export default function AppDashboardPage() {
                 <Select
                   label="Qué ver"
                   value={historicMetric}
-                  onChange={(v) => setHistoricMetric(v as any)}
+                  onChange={(v) => {
+                    if (isMetricKey(v)) setHistoricMetric(v);
+                  }}
                   options={metricOptions.map((m) => ({ value: m.key, label: m.label }))}
                 />
               </div>
@@ -978,7 +977,7 @@ export default function AppDashboardPage() {
                     <XAxis dataKey="year" tick={{ fill: "#E5E7EB" }} />
                     <YAxis tick={{ fill: "#E5E7EB" }} />
                     <Tooltip
-                      formatter={(v: any) => formatEUR(Number(v))}
+                      formatter={(v: unknown) => formatEUR(Number(v))}
                       contentStyle={{
                         background: "rgba(15, 23, 42, 0.95)",
                         border: "1px solid rgba(255,255,255,0.12)",
@@ -996,6 +995,17 @@ export default function AppDashboardPage() {
             </div>
           </section>
         ) : null}
+
+        <ConfirmDialog
+          open={confirmMovementId !== null}
+          title="¿Eliminar este movimiento?"
+          description="El movimiento desaparecerá de tus registros y esta acción no se puede deshacer."
+          loading={confirmMovementId !== null && deletingId === confirmMovementId}
+          onCancel={() => setConfirmMovementId(null)}
+          onConfirm={() => {
+            if (confirmMovementId) void onDeleteMovement(confirmMovementId);
+          }}
+        />
 
         <p className="text-center text-xs text-gray-500">
           Nota: estas gráficas son solo para fines informativos y no constituyen asesoramiento financiero. Todos los datos cumplen con la GDPR y se manejan de forma segura.
@@ -1019,10 +1029,10 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={[
-        "px-4 py-2 rounded-2xl text-sm font-semibold transition border",
+        "rounded-xl border px-4 py-2 text-sm font-semibold",
         active
-          ? "bg-white/10 border-white/20 text-white"
-          : "bg-black/10 border-white/10 text-gray-300 hover:bg-black/20",
+          ? "border-white/15 bg-white/10 text-white shadow-sm"
+          : "border-transparent bg-transparent text-slate-400 hover:border-white/10 hover:bg-white/[0.05] hover:text-slate-100",
       ].join(" ")}
     >
       {children}

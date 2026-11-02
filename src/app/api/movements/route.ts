@@ -1,6 +1,7 @@
 // src/app/api/movements/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@/app/lib/auth";
+import { serverAuth } from "@/app/lib/auth";
+import { backendErrorResponse, getErrorMessage, isValidYmd, sameOriginFailure } from "@/app/lib/api/errors";
 
 type BackendMovement = {
   id: number;
@@ -116,19 +117,18 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function isYmd(s: unknown): s is string {
-  return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 function baseUrl() {
-  return process.env.API_GATEWAY_URL ?? "http://localhost:8081";
+  return process.env.API_GATEWAY_URL ?? "http://localhost:8080";
 }
 
 /**
  * POST /api/movements
  */
-export const POST = auth(async (req) => {
+export const POST = serverAuth(async (req) => {
   try {
+    const originFailure = sameOriginFailure(req);
+    if (originFailure) return originFailure;
+
     const userEmail = req.auth?.user?.email;
     if (!userEmail) {
       return NextResponse.json(
@@ -137,7 +137,7 @@ export const POST = auth(async (req) => {
       );
     }
 
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
     if (!accessToken) {
       return NextResponse.json(
         { ok: false, error: { message: "Token inválido (sin accessToken)" } },
@@ -178,7 +178,7 @@ export const POST = auth(async (req) => {
       );
     }
 
-    if (!isYmd(date)) {
+    if (!isValidYmd(date)) {
       return NextResponse.json(
         { ok: false, error: { message: "date inválido (formato YYYY-MM-DD)" } },
         { status: 400 }
@@ -229,7 +229,7 @@ export const POST = auth(async (req) => {
       amount,
       date,
       ...(tagId ? { tagId } : {}),
-      ...(description?.trim() ? { description: description.trim() } : {}),
+      description: description?.trim() ?? "",
     };
 
     const res = await fetch(url, {
@@ -242,20 +242,7 @@ export const POST = auth(async (req) => {
       cache: "no-store",
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: `Backend error (${res.status})`,
-            details: text || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
-    }
+    if (!res.ok) return await backendErrorResponse(res, "Error creando el movimiento");
 
     const contentType = res.headers.get("content-type") ?? "";
     const data = contentType.includes("application/json")
@@ -263,15 +250,15 @@ export const POST = auth(async (req) => {
       : null;
 
     return NextResponse.json({ ok: true, data }, { status: 201 });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
 });
 
-export const GET = auth(async (req) => {
+export const GET = serverAuth(async (req) => {
   try {
     if (!req.auth?.user?.email) {
       return NextResponse.json(
@@ -280,7 +267,7 @@ export const GET = auth(async (req) => {
       );
     }
 
-    const accessToken = (req.auth as any)?.accessToken as string | undefined;
+    const accessToken = req.auth?.accessToken;
     if (!accessToken) {
       return NextResponse.json(
         { ok: false, error: { message: "Token inválido (sin accessToken)" } },
@@ -290,6 +277,37 @@ export const GET = auth(async (req) => {
 
     const { searchParams } = new URL(req.url);
     const base = baseUrl();
+
+    // MODO "NET WORTH": /api/movements?netWorth=1
+    const netWorthFlag = searchParams.get("netWorth");
+    if (netWorthFlag === "1" || netWorthFlag === "true" || netWorthFlag === "yes") {
+      const url = `${base}/movement/movements/net-worth`;
+
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+      });
+
+      if (!res.ok) return await backendErrorResponse(res, "Error obteniendo el patrimonio neto");
+
+      const contentType = res.headers.get("content-type") ?? "";
+      const raw = contentType.includes("application/json")
+        ? await res.json().catch(() => null)
+        : await res.text().catch(() => "");
+
+      const netWorth =
+        typeof raw === "number"
+          ? raw
+          : typeof raw === "string"
+          ? Number(raw)
+          : raw;
+
+      return NextResponse.json(
+        { ok: true, data: netWorth, meta: { metric: "NET_WORTH" } },
+        { status: 200 }
+      );
+    }
 
     // ✅ MODO "SAVINGS": /api/movements?savings=1
     const savingsFlag = searchParams.get("savings");
@@ -302,20 +320,7 @@ export const GET = auth(async (req) => {
         cache: "no-store",
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return NextResponse.json(
-          {
-            ok: false,
-            error: {
-              message: `Backend error (${res.status})`,
-              details: text || undefined,
-              urlCalled: url,
-            },
-          },
-          { status: res.status }
-        );
-      }
+      if (!res.ok) return await backendErrorResponse(res, "Error obteniendo los ahorros");
 
       const contentType = res.headers.get("content-type") ?? "";
       const raw = contentType.includes("application/json")
@@ -346,20 +351,7 @@ export const GET = auth(async (req) => {
         cache: "no-store",
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return NextResponse.json(
-          {
-            ok: false,
-            error: {
-              message: `Backend error (${res.status})`,
-              details: text || undefined,
-              urlCalled: url,
-            },
-          },
-          { status: res.status }
-        );
-      }
+      if (!res.ok) return await backendErrorResponse(res, "Error obteniendo los años");
 
       const data = (await res.json()) as number[];
       data.sort((a, b) => a - b);
@@ -406,20 +398,7 @@ export const GET = auth(async (req) => {
         cache: "no-store",
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return NextResponse.json(
-          {
-            ok: false,
-            error: {
-              message: `Backend error (${res.status})`,
-              details: text || undefined,
-              urlCalled: url,
-            },
-          },
-          { status: res.status }
-        );
-      }
+      if (!res.ok) return await backendErrorResponse(res, "Error obteniendo el resumen anual");
 
       const data = (await res.json()) as BackendAnnualResponse;
       data.series?.sort((a, b) => a.month - b.month);
@@ -458,20 +437,7 @@ export const GET = auth(async (req) => {
         cache: "no-store",
       });
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        return NextResponse.json(
-          {
-            ok: false,
-            error: {
-              message: `Backend error (${res.status})`,
-              details: text || undefined,
-              urlCalled: url,
-            },
-          },
-          { status: res.status }
-        );
-      }
+      if (!res.ok) return await backendErrorResponse(res, "Error obteniendo el histórico");
 
       const data = (await res.json()) as BackendHistoricalResponse;
       data.series?.sort((a, b) => a.year - b.year);
@@ -510,20 +476,7 @@ export const GET = auth(async (req) => {
       cache: "no-store",
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return NextResponse.json(
-        {
-          ok: false,
-          error: {
-            message: `Backend error (${res.status})`,
-            details: text || undefined,
-            urlCalled: url,
-          },
-        },
-        { status: res.status }
-      );
-    }
+    if (!res.ok) return await backendErrorResponse(res, "Error obteniendo los movimientos");
 
     const data = (await res.json()) as BackendMovement[];
 
@@ -536,9 +489,9 @@ export const GET = auth(async (req) => {
       { ok: true, data, meta: { year, month: monthIndex0, from, to } },
       { status: 200 }
     );
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { ok: false, error: { message: e?.message ?? "Error interno" } },
+      { ok: false, error: { message: getErrorMessage(e, "Error interno") } },
       { status: 500 }
     );
   }
